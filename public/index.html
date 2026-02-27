@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>MindMappr — AI Agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0d0d14;
+      --surface: #13131f;
+      --surface2: #1a1a2e;
+      --border: #2a2a40;
+      --accent: #e94560;
+      --accent2: #7c3aed;
+      --text: #e8e8f0;
+      --text2: #9090b0;
+      --green: #10b981;
+      --yellow: #f59e0b;
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+    /* ── Top bar ── */
+    .topbar { display: flex; align-items: center; gap: 12px; padding: 0 20px; height: 56px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+    .logo { font-size: 18px; font-weight: 700; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .logo-sub { font-size: 11px; color: var(--text2); font-weight: 400; margin-left: 4px; -webkit-text-fill-color: var(--text2); }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin-left: auto; box-shadow: 0 0 6px var(--green); }
+    .status-label { font-size: 12px; color: var(--text2); }
+
+    /* ── Tabs ── */
+    .tabs { display: flex; gap: 2px; padding: 0 20px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; overflow-x: auto; }
+    .tab { padding: 10px 16px; font-size: 13px; font-weight: 500; color: var(--text2); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; transition: all .15s; }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    /* ── Main layout ── */
+    .main { flex: 1; overflow: hidden; display: flex; }
+    .panel { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+    .panel.active { display: flex; }
+
+    /* ── Chat panel ── */
+    .chat-layout { display: flex; flex: 1; overflow: hidden; }
+    .sessions-sidebar { width: 220px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+    .sessions-header { padding: 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+    .sessions-header span { font-size: 12px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .5px; }
+    .btn-new { background: var(--accent); color: white; border: none; border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; font-weight: 600; }
+    .sessions-list { flex: 1; overflow-y: auto; padding: 8px; }
+    .session-item { padding: 8px 10px; border-radius: 8px; cursor: pointer; margin-bottom: 4px; transition: background .15s; }
+    .session-item:hover { background: var(--surface2); }
+    .session-item.active { background: var(--surface2); border-left: 2px solid var(--accent); }
+    .session-title { font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .session-meta { font-size: 10px; color: var(--text2); margin-top: 2px; }
+
+    .chat-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+    .msg { display: flex; gap: 10px; max-width: 80%; }
+    .msg.user { align-self: flex-end; flex-direction: row-reverse; }
+    .msg.assistant { align-self: flex-start; }
+    .avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+    .msg.user .avatar { background: var(--accent2); }
+    .msg.assistant .avatar { background: linear-gradient(135deg, var(--accent), var(--accent2)); }
+    .bubble { padding: 12px 16px; border-radius: var(--radius); font-size: 14px; line-height: 1.6; max-width: 100%; }
+    .msg.user .bubble { background: var(--accent2); color: white; border-bottom-right-radius: 4px; }
+    .msg.assistant .bubble { background: var(--surface2); color: var(--text); border-bottom-left-radius: 4px; }
+    .bubble p { margin-bottom: 8px; } .bubble p:last-child { margin-bottom: 0; }
+
+    /* file cards in chat */
+    .file-card { margin-top: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .file-card img { max-width: 100%; max-height: 260px; display: block; object-fit: contain; background: #000; }
+    .file-card audio, .file-card video { width: 100%; display: block; }
+    .file-card-footer { padding: 8px 12px; display: flex; align-items: center; gap: 8px; }
+    .file-card-name { font-size: 12px; color: var(--text2); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .btn-dl { background: var(--accent); color: white; border: none; border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; text-decoration: none; font-weight: 600; }
+    .file-icon { font-size: 20px; padding: 12px; }
+
+    /* upload preview in chat */
+    .upload-preview { display: flex; align-items: center; gap: 8px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-top: 6px; }
+    .upload-preview span { font-size: 12px; color: var(--text2); }
+    .upload-preview .remove-file { background: none; border: none; color: var(--text2); cursor: pointer; font-size: 16px; margin-left: auto; }
+
+    /* typing indicator */
+    .typing { display: flex; gap: 4px; align-items: center; padding: 12px 16px; }
+    .typing span { width: 7px; height: 7px; border-radius: 50%; background: var(--text2); animation: bounce 1.2s infinite; }
+    .typing span:nth-child(2) { animation-delay: .2s; }
+    .typing span:nth-child(3) { animation-delay: .4s; }
+    @keyframes bounce { 0%,60%,100% { transform: translateY(0); } 30% { transform: translateY(-6px); } }
+
+    /* input bar */
+    .input-bar { padding: 12px 16px; border-top: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; gap: 8px; }
+    .pending-file { display: flex; align-items: center; gap: 8px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; }
+    .pending-file span { font-size: 12px; color: var(--text2); flex: 1; }
+    .pending-file button { background: none; border: none; color: var(--text2); cursor: pointer; font-size: 16px; }
+    .input-row { display: flex; gap: 8px; align-items: flex-end; }
+    .attach-btn { background: none; border: 1px solid var(--border); color: var(--text2); border-radius: 8px; padding: 8px 10px; cursor: pointer; font-size: 16px; flex-shrink: 0; transition: all .15s; }
+    .attach-btn:hover { border-color: var(--accent); color: var(--accent); }
+    textarea.chat-input { flex: 1; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; color: var(--text); font-family: inherit; font-size: 14px; resize: none; min-height: 44px; max-height: 160px; outline: none; transition: border-color .15s; }
+    textarea.chat-input:focus { border-color: var(--accent); }
+    .send-btn { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: white; border: none; border-radius: 10px; padding: 10px 18px; cursor: pointer; font-size: 14px; font-weight: 600; flex-shrink: 0; transition: opacity .15s; }
+    .send-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* ── Files panel ── */
+    .panel-inner { padding: 24px; overflow-y: auto; flex: 1; }
+    .panel-title { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+    .panel-sub { font-size: 13px; color: var(--text2); margin-bottom: 20px; }
+    .files-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+    .file-tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; transition: border-color .15s; }
+    .file-tile:hover { border-color: var(--accent); }
+    .file-tile-preview { height: 120px; display: flex; align-items: center; justify-content: center; background: var(--surface2); overflow: hidden; }
+    .file-tile-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    .file-tile-preview .big-icon { font-size: 40px; }
+    .file-tile-info { padding: 10px 12px; }
+    .file-tile-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .file-tile-meta { font-size: 11px; color: var(--text2); margin-top: 3px; }
+    .file-tile-actions { display: flex; gap: 6px; margin-top: 8px; }
+    .btn-sm { padding: 4px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 500; border: none; }
+    .btn-dl-sm { background: var(--accent); color: white; text-decoration: none; }
+    .btn-del-sm { background: var(--surface2); color: var(--text2); border: 1px solid var(--border); }
+    .creator-badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; margin-left: 4px; }
+    .creator-mindmappr { background: rgba(233,69,96,.2); color: var(--accent); }
+    .creator-user { background: rgba(124,58,237,.2); color: #a78bfa; }
+    .empty-state { text-align: center; padding: 60px 20px; color: var(--text2); }
+    .empty-icon { font-size: 48px; margin-bottom: 12px; }
+
+    /* ── APIs panel ── */
+    .form-group { margin-bottom: 16px; }
+    .form-label { font-size: 13px; font-weight: 500; color: var(--text2); margin-bottom: 6px; display: block; }
+    .form-input { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; color: var(--text); font-family: inherit; font-size: 14px; outline: none; transition: border-color .15s; }
+    .form-input:focus { border-color: var(--accent); }
+    .form-select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%239090b0' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; }
+    .btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: white; border: none; border-radius: 8px; padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer; transition: opacity .15s; }
+    .btn-primary:hover { opacity: .9; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; }
+    .card-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+    .card-sub { font-size: 12px; color: var(--text2); }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+    .badge-green { background: rgba(16,185,129,.2); color: var(--green); }
+    .badge-yellow { background: rgba(245,158,11,.2); color: var(--yellow); }
+    .badge-red { background: rgba(233,69,96,.2); color: var(--accent); }
+    .api-list { margin-top: 20px; }
+
+    /* ── Connections panel ── */
+    .connections-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+    .conn-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; transition: border-color .15s; }
+    .conn-card:hover { border-color: var(--border); }
+    .conn-card.connected { border-color: var(--green); }
+    .conn-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .conn-icon { font-size: 24px; }
+    .conn-name { font-size: 15px; font-weight: 600; }
+    .conn-desc { font-size: 12px; color: var(--text2); margin-bottom: 12px; }
+    .conn-status { font-size: 11px; color: var(--text2); margin-bottom: 10px; }
+    .conn-status.ok { color: var(--green); }
+    .conn-form { display: flex; flex-direction: column; gap: 8px; }
+    .conn-input { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; color: var(--text); font-family: inherit; font-size: 13px; outline: none; }
+    .conn-input:focus { border-color: var(--accent); }
+    .btn-connect { background: var(--green); color: white; border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .btn-disconnect { background: var(--surface2); color: var(--text2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
+
+    /* ── Analytics panel ── */
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px; }
+    .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+    .stat-num { font-size: 28px; font-weight: 700; color: var(--accent); }
+    .stat-label { font-size: 12px; color: var(--text2); margin-top: 4px; }
+    .chart-bar-wrap { display: flex; flex-direction: column; gap: 6px; }
+    .chart-bar-row { display: flex; align-items: center; gap: 8px; }
+    .chart-bar-label { font-size: 11px; color: var(--text2); width: 80px; flex-shrink: 0; text-align: right; }
+    .chart-bar-track { flex: 1; height: 16px; background: var(--surface2); border-radius: 4px; overflow: hidden; }
+    .chart-bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); border-radius: 4px; transition: width .5s; }
+    .chart-bar-val { font-size: 11px; color: var(--text2); width: 30px; }
+
+    /* scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* toast */
+    #toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 18px; font-size: 13px; color: var(--text); box-shadow: 0 8px 32px rgba(0,0,0,.4); opacity: 0; transform: translateY(8px); transition: all .25s; pointer-events: none; z-index: 999; }
+    #toast.show { opacity: 1; transform: translateY(0); }
+    #toast.success { border-color: var(--green); }
+    #toast.error { border-color: var(--accent); }
+  </style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="logo">MindMappr<span class="logo-sub">Agent v4</span></span>
+  <span style="flex:1"></span>
+  <span class="status-label" id="statusLabel">Connected</span>
+  <span class="status-dot" id="statusDot"></span>
+</div>
+
+<div class="tabs">
+  <div class="tab active" data-tab="chat">💬 Chat</div>
+  <div class="tab" data-tab="files">📁 Files</div>
+  <div class="tab" data-tab="connections">🔌 Connections</div>
+  <div class="tab" data-tab="apis">🔑 APIs</div>
+  <div class="tab" data-tab="analytics">📊 Analytics</div>
+</div>
+
+<div class="main">
+
+  <!-- ── CHAT ── -->
+  <div class="panel active" id="panel-chat">
+    <div class="chat-layout">
+      <div class="sessions-sidebar">
+        <div class="sessions-header">
+          <span>Sessions</span>
+          <button class="btn-new" onclick="newSession()">+ New</button>
+        </div>
+        <div class="sessions-list" id="sessionsList"></div>
+      </div>
+      <div class="chat-area">
+        <div class="messages" id="messages"></div>
+        <div class="input-bar">
+          <div id="pendingFileBar" style="display:none" class="pending-file">
+            <span>📎</span><span id="pendingFileName" style="flex:1"></span>
+            <button onclick="clearPendingFile()">✕</button>
+          </div>
+          <div class="input-row">
+            <button class="attach-btn" onclick="document.getElementById('fileInput').click()" title="Attach file">📎</button>
+            <input type="file" id="fileInput" style="display:none" onchange="handleFileSelect(event)">
+            <textarea class="chat-input" id="chatInput" placeholder="Ask me to do something… generate audio, write a doc, scrape a site, run code…" rows="1"
+              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage();}"
+              oninput="autoResize(this)"></textarea>
+            <button class="send-btn" id="sendBtn" onclick="sendMessage()">Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── FILES ── -->
+  <div class="panel" id="panel-files">
+    <div class="panel-inner">
+      <div class="panel-title">📁 Files</div>
+      <div class="panel-sub">All files — uploaded by you or generated by MindMappr</div>
+      <div id="filesGrid" class="files-grid"></div>
+    </div>
+  </div>
+
+  <!-- ── CONNECTIONS ── -->
+  <div class="panel" id="panel-connections">
+    <div class="panel-inner">
+      <div class="panel-title">🔌 Connections</div>
+      <div class="panel-sub">Connect services so MindMappr can use them on your behalf</div>
+      <div id="connectionsGrid" class="connections-grid"></div>
+    </div>
+  </div>
+
+  <!-- ── APIs ── -->
+  <div class="panel" id="panel-apis">
+    <div class="panel-inner">
+      <div class="panel-title">🔑 API Keys</div>
+      <div class="panel-sub">Register API keys for services MindMappr can call</div>
+      <div class="card">
+        <div class="card-title">Register an API</div>
+        <div style="margin-top:14px">
+          <div class="form-group">
+            <label class="form-label">Service Name</label>
+            <input class="form-input" id="apiName" placeholder="e.g. ElevenLabs">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Base URL</label>
+            <input class="form-input" id="apiUrl" placeholder="https://api.elevenlabs.io">
+          </div>
+          <div class="form-group">
+            <label class="form-label">API Key</label>
+            <input class="form-input" id="apiKey" type="password" placeholder="sk-...">
+          </div>
+          <div style="display:flex;gap:10px">
+            <div style="flex:1" class="form-group">
+              <label class="form-label">Tier</label>
+              <select class="form-input form-select" id="apiTier">
+                <option value="free">Free</option>
+                <option value="paid">Paid</option>
+                <option value="premium">Premium</option>
+              </select>
+            </div>
+            <div style="flex:1" class="form-group">
+              <label class="form-label">Rate Limit (req/day)</label>
+              <input class="form-input" id="apiRate" type="number" value="100">
+            </div>
+          </div>
+          <button class="btn-primary" onclick="registerApi()">Register API</button>
+        </div>
+      </div>
+      <div class="api-list" id="apiList"></div>
+    </div>
+  </div>
+
+  <!-- ── ANALYTICS ── -->
+  <div class="panel" id="panel-analytics">
+    <div class="panel-inner">
+      <div class="panel-title">📊 Analytics</div>
+      <div class="panel-sub">Usage stats for your MindMappr agent</div>
+      <div class="stats-grid" id="statsGrid"></div>
+      <div class="card">
+        <div class="card-title" style="margin-bottom:14px">Activity — Last 30 Days</div>
+        <div class="chart-bar-wrap" id="chartBars"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div id="toast"></div>
+
+<script>
+const APIBASE = '/mindmappr/api';
+
+let sessionId = localStorage.getItem('mm_session') || null;
+let pendingFile = null;
+let isLoading = false;
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+function toast(msg, type='') {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'show ' + type;
+  setTimeout(() => t.className = '', 3000);
+}
+
+// ── Tab switching ──────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+    if (tab.dataset.tab === 'files') loadFiles();
+    if (tab.dataset.tab === 'connections') loadConnections();
+    if (tab.dataset.tab === 'apis') loadApis();
+    if (tab.dataset.tab === 'analytics') loadAnalytics();
+  });
+});
+
+// ── Auto-resize textarea ───────────────────────────────────────────────────
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+}
+
+// ── Sessions ───────────────────────────────────────────────────────────────
+async function loadSessions() {
+  try {
+    const r = await fetch(`${APIBASE}/chat/sessions`);
+    const d = await r.json();
+    const list = document.getElementById('sessionsList');
+    if (!d.data || d.data.length === 0) {
+      list.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--text2)">No sessions yet</div>';
+      return;
+    }
+    list.innerHTML = d.data.map(s => `
+      <div class="session-item ${s.sessionId === sessionId ? 'active' : ''}" onclick="loadSession('${s.sessionId}')">
+        <div class="session-title">${escHtml(s.lastMessage || 'New chat')}</div>
+        <div class="session-meta">${s.messageCount} msgs · ${timeAgo(s.updatedAt)}</div>
+      </div>
+    `).join('');
+  } catch(e) { console.error(e); }
+}
+
+function newSession() {
+  sessionId = null;
+  localStorage.removeItem('mm_session');
+  document.getElementById('messages').innerHTML = '';
+  addWelcomeMsg();
+  loadSessions();
+}
+
+async function loadSession(sid) {
+  sessionId = sid;
+  localStorage.setItem('mm_session', sid);
+  const r = await fetch(`${APIBASE}/chat/history/${sid}`);
+  const d = await r.json();
+  const msgs = document.getElementById('messages');
+  msgs.innerHTML = '';
+  (d.data || []).forEach(m => {
+    if (m.role === 'user') appendMsg('user', m.content);
+    else if (m.role === 'assistant') appendMsg('assistant', m.content);
+  });
+  loadSessions();
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+// ── Chat ───────────────────────────────────────────────────────────────────
+function addWelcomeMsg() {
+  appendMsg('assistant', "Hey! I'm MindMappr — your AI execution agent. Tell me what you need done and I'll do it. I can generate audio, create images, build documents, run code, scrape websites, make spreadsheets, and more. What can I make for you today?");
+}
+
+function appendMsg(role, text, fileData) {
+  const msgs = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  const avatar = role === 'user' ? '👤' : '✨';
+  let fileHtml = '';
+  if (fileData) {
+    fileHtml = buildFileCard(fileData.name, fileData.type);
+  }
+  div.innerHTML = `
+    <div class="avatar">${avatar}</div>
+    <div>
+      <div class="bubble">${formatText(text)}</div>
+      ${fileHtml}
+    </div>
+  `;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function buildFileCard(name, type) {
+  const dlUrl = `${APIBASE}/files/download/${encodeURIComponent(name)}`;
+  const previewUrl = `/mindmappr/uploads/${encodeURIComponent(name)}`;
+  let preview = '';
+  if (type === 'image' || name.match(/\.(png|jpg|jpeg|gif|webp)$/i)) {
+    preview = `<img src="${previewUrl}" alt="${escHtml(name)}" loading="lazy">`;
+  } else if (type === 'audio' || name.match(/\.(mp3|wav|ogg)$/i)) {
+    preview = `<audio controls src="${previewUrl}"></audio>`;
+  } else if (type === 'video' || name.match(/\.mp4$/i)) {
+    preview = `<video controls src="${previewUrl}" style="max-height:200px"></video>`;
+  } else {
+    const icons = { document: '📄', csv: '📊', html: '🌐', pdf: '📕', zip: '📦' };
+    preview = `<div class="file-icon">${icons[type] || '📎'}</div>`;
+  }
+  return `<div class="file-card">
+    ${preview}
+    <div class="file-card-footer">
+      <span class="file-card-name">📎 ${escHtml(name)}</span>
+      <a class="btn-dl" href="${dlUrl}" download="${escHtml(name)}">Download</a>
+    </div>
+  </div>`;
+}
+
+function showTyping() {
+  const msgs = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = 'msg assistant'; div.id = 'typing-indicator';
+  div.innerHTML = `<div class="avatar">✨</div><div class="bubble"><div class="typing"><span></span><span></span><span></span></div></div>`;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+function hideTyping() { document.getElementById('typing-indicator')?.remove(); }
+
+async function sendMessage() {
+  if (isLoading) return;
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if (!text && !pendingFile) return;
+  isLoading = true;
+  document.getElementById('sendBtn').disabled = true;
+
+  // Show user message
+  let userText = text;
+  if (pendingFile) userText += (text ? '\n' : '') + `[Attached: ${pendingFile.name}]`;
+  appendMsg('user', userText);
+  input.value = ''; input.style.height = 'auto';
+
+  // Upload file if pending
+  let attachedFileMeta = null;
+  if (pendingFile) {
+    try {
+      const fd = new FormData();
+      fd.append('file', pendingFile);
+      const r = await fetch(`${APIBASE}/files/upload`, { method: 'POST', body: fd });
+      const d = await r.json();
+      if (d.success && d.data?.[0]) attachedFileMeta = d.data[0];
+    } catch(e) { console.error('Upload failed', e); }
+    clearPendingFile();
+  }
+
+  showTyping();
+  try {
+    const body = { message: text, sessionId };
+    if (attachedFileMeta) body.attachedFile = attachedFileMeta;
+    const r = await fetch(`${APIBASE}/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = await r.json();
+    hideTyping();
+    if (d.success) {
+      sessionId = d.data.sessionId;
+      localStorage.setItem('mm_session', sessionId);
+      appendMsg('assistant', d.data.reply, d.data.generatedFile);
+      loadSessions();
+    } else {
+      appendMsg('assistant', 'Something went wrong. Please try again.');
+    }
+  } catch(e) {
+    hideTyping();
+    appendMsg('assistant', 'Connection error. Please check your network and try again.');
+  }
+  isLoading = false;
+  document.getElementById('sendBtn').disabled = false;
+}
+
+// ── File attach ────────────────────────────────────────────────────────────
+function handleFileSelect(e) {
+  const file = e.target.files[0]; if (!file) return;
+  pendingFile = file;
+  document.getElementById('pendingFileName').textContent = file.name + ' (' + Math.round(file.size/1024) + 'KB)';
+  document.getElementById('pendingFileBar').style.display = 'flex';
+  e.target.value = '';
+}
+function clearPendingFile() {
+  pendingFile = null;
+  document.getElementById('pendingFileBar').style.display = 'none';
+  document.getElementById('pendingFileName').textContent = '';
+}
+
+// ── Files tab ──────────────────────────────────────────────────────────────
+async function loadFiles() {
+  const grid = document.getElementById('filesGrid');
+  grid.innerHTML = '<div style="color:var(--text2);font-size:13px">Loading…</div>';
+  try {
+    const r = await fetch(`${APIBASE}/files/list`);
+    const d = await r.json();
+    if (!d.data || d.data.length === 0) {
+      grid.innerHTML = '<div class="empty-state"><div class="empty-icon">📭</div><div>No files yet. Ask MindMappr to create something!</div></div>';
+      return;
+    }
+    grid.innerHTML = d.data.map(f => {
+      const dlUrl = `${APIBASE}/files/download/${encodeURIComponent(f.name)}`;
+      const previewUrl = `/mindmappr/uploads/${encodeURIComponent(f.name)}`;
+      let preview = '';
+      if (f.type?.startsWith('image/')) {
+        preview = `<img src="${previewUrl}" alt="${escHtml(f.name)}" loading="lazy">`;
+      } else {
+        const icons = { 'audio/mpeg':'🎵','audio/wav':'🎵','video/mp4':'🎬','text/markdown':'📄','text/plain':'📄','text/csv':'📊','text/html':'🌐','application/pdf':'📕','application/zip':'📦','application/json':'📋' };
+        const icon = icons[f.type] || '📎';
+        preview = `<div class="big-icon">${icon}</div>`;
+      }
+      const badge = f.creator === 'mindmappr'
+        ? '<span class="creator-badge creator-mindmappr">✨ Agent</span>'
+        : '<span class="creator-badge creator-user">👤 You</span>';
+      return `<div class="file-tile">
+        <div class="file-tile-preview">${preview}</div>
+        <div class="file-tile-info">
+          <div class="file-tile-name" title="${escHtml(f.name)}">${escHtml(f.name)}</div>
+          <div class="file-tile-meta">${fmtSize(f.size)} · ${timeAgo(f.uploadedAt)} ${badge}</div>
+          <div class="file-tile-actions">
+            <a class="btn-sm btn-dl-sm" href="${dlUrl}" download="${escHtml(f.name)}">⬇ Download</a>
+            <button class="btn-sm btn-del-sm" onclick="deleteFile('${escHtml(f.name)}')">🗑 Delete</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) { grid.innerHTML = '<div style="color:var(--accent)">Error loading files</div>'; }
+}
+
+async function deleteFile(name) {
+  if (!confirm(`Delete ${name}?`)) return;
+  const r = await fetch(`${APIBASE}/files/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  const d = await r.json();
+  if (d.success) { toast('File deleted', 'success'); loadFiles(); }
+  else toast('Delete failed: ' + d.error, 'error');
+}
+
+// ── Connections ────────────────────────────────────────────────────────────
+async function loadConnections() {
+  const grid = document.getElementById('connectionsGrid');
+  grid.innerHTML = '<div style="color:var(--text2);font-size:13px">Loading…</div>';
+  try {
+    const r = await fetch(`${APIBASE}/connections/list`);
+    const d = await r.json();
+    grid.innerHTML = d.data.map(c => `
+      <div class="conn-card ${c.connected ? 'connected' : ''}" id="conn-${c.id}">
+        <div class="conn-header">
+          <span class="conn-icon">${c.icon}</span>
+          <span class="conn-name">${escHtml(c.name)}</span>
+          ${c.connected ? '<span class="badge badge-green" style="margin-left:auto">Connected</span>' : ''}
+        </div>
+        <div class="conn-desc">${escHtml(c.description)}</div>
+        ${c.connected
+          ? `<div class="conn-status ok">✓ ${escHtml(c.accountName || c.id)} · ${timeAgo(c.connectedAt)}</div>
+             <button class="btn-disconnect" onclick="disconnectService('${c.id}')">Disconnect</button>`
+          : `<div class="conn-form">
+               <input class="conn-input" id="tok-${c.id}" type="password" placeholder="${c.keyBased ? 'API Key or Token' : 'Access Token'}">
+               <input class="conn-input" id="acc-${c.id}" placeholder="Account name (optional)">
+               <button class="btn-connect" onclick="connectService('${c.id}')">Connect</button>
+             </div>`
+        }
+      </div>
+    `).join('');
+  } catch(e) { grid.innerHTML = '<div style="color:var(--accent)">Error loading connections</div>'; }
+}
+
+async function connectService(id) {
+  const token = document.getElementById(`tok-${id}`)?.value?.trim();
+  const accountName = document.getElementById(`acc-${id}`)?.value?.trim();
+  if (!token) { toast('Token is required', 'error'); return; }
+  const r = await fetch(`${APIBASE}/connections/connect`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ id, token, accountName }) });
+  const d = await r.json();
+  if (d.success) { toast(`${id} connected!`, 'success'); loadConnections(); }
+  else toast('Error: ' + d.error, 'error');
+}
+
+async function disconnectService(id) {
+  const r = await fetch(`${APIBASE}/connections/disconnect`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ id }) });
+  const d = await r.json();
+  if (d.success) { toast(`${id} disconnected`, 'success'); loadConnections(); }
+}
+
+// ── APIs ───────────────────────────────────────────────────────────────────
+async function loadApis() {
+  const list = document.getElementById('apiList');
+  const r = await fetch(`${APIBASE}/agent/apis/list`);
+  const d = await r.json();
+  if (!d.data || d.data.length === 0) {
+    list.innerHTML = '<div style="color:var(--text2);font-size:13px;margin-top:8px">No APIs registered yet.</div>';
+    return;
+  }
+  list.innerHTML = '<div style="font-size:13px;font-weight:600;color:var(--text2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">Registered APIs</div>' +
+    d.data.map(a => `
+      <div class="card" style="display:flex;align-items:center;gap:12px">
+        <div style="flex:1">
+          <div class="card-title">${escHtml(a.name)}</div>
+          <div class="card-sub">${escHtml(a.baseUrl)} · ${escHtml(a.keyHint)}</div>
+        </div>
+        <span class="badge ${a.tier === 'premium' ? 'badge-yellow' : 'badge-green'}">${a.tier}</span>
+      </div>
+    `).join('');
+}
+
+async function registerApi() {
+  const name = document.getElementById('apiName').value.trim();
+  const baseUrl = document.getElementById('apiUrl').value.trim();
+  const apiKey = document.getElementById('apiKey').value.trim();
+  const tier = document.getElementById('apiTier').value;
+  const rateLimit = parseInt(document.getElementById('apiRate').value) || 100;
+  if (!name || !baseUrl || !apiKey) { toast('All fields required', 'error'); return; }
+  const r = await fetch(`${APIBASE}/agent/apis/register`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name, baseUrl, apiKey, tier, rateLimit }) });
+  const d = await r.json();
+  if (d.success) {
+    toast(`${name} registered!`, 'success');
+    document.getElementById('apiName').value = '';
+    document.getElementById('apiUrl').value = '';
+    document.getElementById('apiKey').value = '';
+    loadApis();
+  } else toast('Error: ' + d.error, 'error');
+}
+
+// ── Analytics ──────────────────────────────────────────────────────────────
+async function loadAnalytics() {
+  try {
+    const r = await fetch(`${APIBASE}/analytics`);
+    const d = await r.json();
+    const stats = d.data;
+    document.getElementById('statsGrid').innerHTML = `
+      <div class="stat-card"><div class="stat-num">${stats.total}</div><div class="stat-label">Total Interactions</div></div>
+      <div class="stat-card"><div class="stat-num">${stats.last24h}</div><div class="stat-label">Last 24 Hours</div></div>
+      <div class="stat-card"><div class="stat-num">${stats.last7d}</div><div class="stat-label">Last 7 Days</div></div>
+    `;
+    const byDay = stats.byDay || [];
+    const max = Math.max(...byDay.map(b => b.count), 1);
+    document.getElementById('chartBars').innerHTML = byDay.length === 0
+      ? '<div style="color:var(--text2);font-size:13px">No data yet</div>'
+      : byDay.slice(-14).map(b => `
+          <div class="chart-bar-row">
+            <div class="chart-bar-label">${b.date.slice(5)}</div>
+            <div class="chart-bar-track"><div class="chart-bar-fill" style="width:${Math.round(b.count/max*100)}%"></div></div>
+            <div class="chart-bar-val">${b.count}</div>
+          </div>
+        `).join('');
+  } catch(e) { console.error(e); }
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function formatText(t) {
+  return escHtml(t)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/\n/g, '<br>');
+}
+function fmtSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return Math.round(bytes/1024) + ' KB';
+  return (bytes/1048576).toFixed(1) + ' MB';
+}
+function timeAgo(iso) {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff/60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return m + 'm ago';
+  const h = Math.floor(m/60);
+  if (h < 24) return h + 'h ago';
+  return Math.floor(h/24) + 'd ago';
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+async function init() {
+  // Check health
+  try {
+    const r = await fetch(`${APIBASE}/health`);
+    const d = await r.json();
+    if (d.status === 'ok') {
+      document.getElementById('statusLabel').textContent = 'Agent Ready';
+      document.getElementById('statusDot').style.background = 'var(--green)';
+    }
+  } catch(e) {
+    document.getElementById('statusLabel').textContent = 'Offline';
+    document.getElementById('statusDot').style.background = 'var(--accent)';
+  }
+
+  // Load sessions
+  await loadSessions();
+
+  // Load or start session
+  if (sessionId) {
+    await loadSession(sessionId);
+  } else {
+    addWelcomeMsg();
+  }
+}
+
+init();
+</script>
+</body>
+</html>
