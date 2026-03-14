@@ -178,6 +178,13 @@ app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 app.use("/mindmappr", express.static(join(__dirname, "public")));
 app.use("/mindmappr/uploads", express.static(UPLOADS_DIR));
+// ── URL rewrite: /mindmappr/api/* → /api/* (standalone deployment support) ───
+app.use("/mindmappr/api", (req, _res, next) => {
+  req.url = "/api" + req.url;
+  next("route");
+});
+// ── Root redirect ───────────────────────────────────────────────────────────
+app.get("/", (_, res) => res.redirect("/mindmappr"));
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ── System prompt (v5 — enhanced with memory + multi-step) ──────────────────
