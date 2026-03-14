@@ -176,13 +176,15 @@ function storeMemoryFromConversation(sessionId, userMsg, assistantReply) {
 // ══════════════════════════════════════════════════════════════════════════════
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
+// ── URL rewrite: strip /mindmappr prefix for API and upload routes ─────────
+app.use((req, _res, next) => {
+  if (req.url.startsWith("/mindmappr/api/") || req.url.startsWith("/mindmappr/api?")) {
+    req.url = req.url.replace("/mindmappr", "");
+  }
+  next();
+});
 app.use("/mindmappr", express.static(join(__dirname, "public")));
 app.use("/mindmappr/uploads", express.static(UPLOADS_DIR));
-// ── URL rewrite: /mindmappr/api/* → /api/* (standalone deployment support) ───
-app.use("/mindmappr/api", (req, _res, next) => {
-  req.url = "/api" + req.url;
-  next("route");
-});
 // ── Root redirect ───────────────────────────────────────────────────────────
 app.get("/", (_, res) => res.redirect("/mindmappr"));
 
