@@ -593,6 +593,14 @@ app.get("/api/auth/logout", (req, res) => {
   res.redirect("/");
 });
 
+// URL rewrite — normalize /mindmappr/api/* to /api/* BEFORE auth check
+app.use((req, _res, next) => {
+  if (req.url.startsWith("/mindmappr/api/") || req.url.startsWith("/mindmappr/api?")) {
+    req.url = req.url.replace("/mindmappr", "");
+  }
+  next();
+});
+
 // Auth middleware — protect everything except login and health
 app.use((req, res, next) => {
   if (req.path === "/api/auth/login" || req.path === "/api/health") return next();
@@ -600,13 +608,6 @@ app.use((req, res, next) => {
   if (isValidSession(cookies.mm_session)) return next();
   if (req.path.startsWith("/api/")) return res.status(401).json({ error: "Unauthorized" });
   return res.send(LOGIN_PAGE);
-});
-
-app.use((req, _res, next) => {
-  if (req.url.startsWith("/mindmappr/api/") || req.url.startsWith("/mindmappr/api?")) {
-    req.url = req.url.replace("/mindmappr", "");
-  }
-  next();
 });
 app.use("/mindmappr", express.static(join(__dirname, "public")));
 app.use("/mindmappr/uploads", express.static(UPLOADS_DIR));
