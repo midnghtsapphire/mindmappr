@@ -65,7 +65,6 @@ function friendlyError(err, label) {
     return `${label} took too long to respond. Please try again.`;
   if (msg.includes("500") || msg.includes("502") || msg.includes("503"))
     return `${label} is having server issues. Please try again shortly.`;
-  // Strip stack traces, return first line only
   return `${label} ran into an issue: ${msg.split("\n")[0].slice(0, 150)}`;
 }
 
@@ -108,10 +107,25 @@ db.exec(`
     cron_expression TEXT NOT NULL,
     task_type TEXT NOT NULL,
     task_config TEXT NOT NULL,
+    assigned_agent TEXT DEFAULT NULL,
     enabled INTEGER DEFAULT 1,
     last_run TEXT,
     next_run TEXT,
     created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS agent_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_name TEXT NOT NULL,
+    task_type TEXT NOT NULL DEFAULT 'chat',
+    input TEXT NOT NULL,
+    output TEXT,
+    status TEXT NOT NULL DEFAULT 'running',
+    cost_estimate REAL DEFAULT 0,
+    tokens_used INTEGER DEFAULT 0,
+    elapsed_ms INTEGER DEFAULT 0,
+    session_id TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    completed_at TEXT
   );
 `);
 
@@ -143,9 +157,7 @@ function getMemoryContext() {
 }
 
 function storeMemoryFromConversation(sessionId, userMsg, assistantReply) {
-  // Extract and store facts asynchronously (fire and forget)
   try {
-    // Simple heuristic extraction — store user preferences mentioned
     const prefPatterns = [
       { re: /(?:my name is|i'm|i am|call me)\s+(\w+)/i, key: "user_name" },
       { re: /(?:i prefer|i like|i want)\s+(.{5,60})/i, key: "preference" },
@@ -156,12 +168,10 @@ function storeMemoryFromConversation(sessionId, userMsg, assistantReply) {
         db.prepare("INSERT OR REPLACE INTO user_preferences (key, value, updated_at) VALUES (?, ?, datetime('now'))").run(p.key, m[1].trim());
       }
     }
-    // Store a conversation summary every 10 messages
     const hf = join(DATA_DIR, `session_${sessionId}.json`);
     try {
       const history = JSON.parse(readFileSync(hf, "utf8"));
       if (history.length > 0 && history.length % 10 === 0) {
-        // Use last few messages as a quick summary
         const recent = history.slice(-6).map(m => `${m.role}: ${m.content.slice(0, 100)}`).join(" | ");
         db.prepare("INSERT INTO conversation_summaries (session_id, summary) VALUES (?, ?)").run(sessionId, recent.slice(0, 500));
       }
@@ -172,11 +182,333 @@ function storeMemoryFromConversation(sessionId, userMsg, assistantReply) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// ── v6: OpenAudrey Agent System ─────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+const AGENT_DEFINITIONS = {
+  rex: {
+    name: "Rex",
+    model: "anthropic/claude-sonnet-4",
+    role: "Primary brain — makes decisions, delegates tasks, handles escalations",
+    description: "Rex is the primary decision-maker and orchestrator. When you send a message without mentioning a specific agent, Rex decides how to handle it and can delegate to other agents.",
+    icon: "🧠",
+    color: "#e94560",
+    systemPrompt: `You are Rex, the primary AI agent for MindMappr — a multi-agent command center owned by Audrey Evans (Freedom Angel Corps, Wellington, CO).
+
+Your role: Make decisions, coordinate other agents, handle escalations, and manage all projects.
+
+AVAILABLE AGENTS YOU CAN DELEGATE TO:
+- Watcher: Monitoring, health checks, status reports
+- Scheduler: Cron tasks, scheduling, morning briefs
+- Processor: Fast data processing, email parsing, structured extraction
+- Generator: Content creation, blog posts, reports, documentation
+
+DELEGATION FORMAT (include in your response when delegating):
+DELEGATE:watcher:Check system health status
+DELEGATE:processor:Parse the incoming data
+DELEGATE:generator:Create a blog post about X
+DELEGATE:scheduler:Schedule a daily task at 9am
+
+RULES:
+1. Always respond with actionable information
+2. When asked for status, provide a concise summary
+3. Be warm, direct, and accessible — no jargon
+4. Keep responses under 200 words unless the task requires more
+5. When a task is better handled by another agent, delegate it
+6. Reference timestamps on all data points
+
+Owner: Audrey Evans, AuDHD, 60, cancer survivor. Be warm and direct.
+Current date: ${new Date().toISOString().split('T')[0]}`,
+  },
+  watcher: {
+    name: "Watcher",
+    model: "mistralai/mistral-small",
+    role: "Monitoring loop — health checks, anomaly detection, status reports",
+    description: "Watcher monitors system health, checks for anomalies, tracks API spend, and reports on the status of all services and projects.",
+    icon: "👁️",
+    color: "#10b981",
+    systemPrompt: `You are Watcher, a monitoring agent for MindMappr.
+Your job: Analyze system status, report on health, detect anomalies.
+
+When asked for a status report, provide:
+1. Overall system health assessment
+2. Any anomalies or concerns detected
+3. Resource usage summary
+4. Recommended actions (if any)
+
+Respond with structured, concise information. Use severity levels:
+- OK: Normal operation
+- WARNING: Unusual but not urgent
+- ALERT: Needs attention soon
+- CRITICAL: Immediate action required
+
+Be concise and data-driven. Include timestamps.
+Current date: ${new Date().toISOString().split('T')[0]}`,
+  },
+  scheduler: {
+    name: "Scheduler",
+    model: "mistralai/mistral-small",
+    role: "Cron tasks — scheduling, morning briefs, recurring automation",
+    description: "Scheduler manages recurring tasks, generates morning briefs, and handles all time-based automation within the system.",
+    icon: "📅",
+    color: "#f59e0b",
+    systemPrompt: `You are Scheduler, a cron-based task agent for MindMappr.
+Your job: Execute scheduled tasks, generate briefs, and manage recurring automation.
+
+For morning briefs, provide:
+1. Project status summary
+2. Yesterday's activity highlights
+3. Today's scheduled tasks
+4. Pending items requiring attention
+
+For scheduling requests, help the user define:
+- Task name and description
+- Cron expression (explain it in plain language)
+- What action to take when triggered
+
+Keep responses concise and actionable.
+Current date: ${new Date().toISOString().split('T')[0]}`,
+  },
+  processor: {
+    name: "Processor",
+    model: "anthropic/claude-3.5-haiku",
+    role: "Fast data/email processing — parsing, extraction, structuring",
+    description: "Processor handles fast data operations: parsing emails, extracting structured information, processing CSV data, and transforming content into organized formats.",
+    icon: "⚡",
+    color: "#7c3aed",
+    systemPrompt: `You are Processor, a fast data processing agent for MindMappr.
+Model: Claude Haiku (optimized for speed and efficiency)
+
+Your job: Process data, parse emails, extract structured information, and transform content.
+
+Rules:
+1. Return structured, well-organized responses
+2. Extract key fields from any data (sender, subject, action items, dates)
+3. Flag anything that needs escalation to Rex
+4. Include timestamps on all processed data
+5. Be concise — focus on the data, not explanations
+
+Current date: ${new Date().toISOString().split('T')[0]}`,
+  },
+  generator: {
+    name: "Generator",
+    model: "anthropic/claude-sonnet-4",
+    role: "Content creation — blog posts, reports, documentation, marketing copy",
+    description: "Generator creates high-quality content: blog posts, reports, documentation, marketing copy, and more. Has a rate limit of 20 calls per hour to manage costs.",
+    icon: "✍️",
+    color: "#ec4899",
+    systemPrompt: `You are Generator, a content creation agent for MindMappr.
+Model: Claude Sonnet 4 (high quality output)
+
+Your job: Create content — blog posts, reports, documentation, marketing copy, social media posts.
+
+RULES:
+1. Create high-quality, original content
+2. Include generation date and context in all content
+3. Match the tone and style requested
+4. Be thorough but not verbose
+5. Structure content with clear headings and sections
+6. When creating marketing copy, be engaging and authentic
+
+Owner: Audrey Evans (Freedom Angel Corps)
+Current date: ${new Date().toISOString().split('T')[0]}`,
+  },
+};
+
+// Agent state tracking (in-memory, resets on restart)
+const agentState = {};
+for (const [key, def] of Object.entries(AGENT_DEFINITIONS)) {
+  agentState[key] = {
+    status: "online",
+    lastActivity: new Date().toISOString(),
+    taskCount: 0,
+    totalCost: 0,
+  };
+}
+
+// Generator rate limiting
+let generatorCallTimestamps = [];
+const GENERATOR_RATE_LIMIT = 20;
+
+function canGenerate() {
+  const oneHourAgo = Date.now() - 3600000;
+  generatorCallTimestamps = generatorCallTimestamps.filter(t => t > oneHourAgo);
+  return generatorCallTimestamps.length < GENERATOR_RATE_LIMIT;
+}
+
+function getGeneratorCallsThisHour() {
+  const oneHourAgo = Date.now() - 3600000;
+  generatorCallTimestamps = generatorCallTimestamps.filter(t => t > oneHourAgo);
+  return generatorCallTimestamps.length;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Agent LLM call (routes through OpenRouter using LLM_API_KEY) ────────────
+// ══════════════════════════════════════════════════════════════════════════════
+async function callAgentLLM(agentName, messages, maxTokens = 2048) {
+  const agent = AGENT_DEFINITIONS[agentName];
+  if (!agent) throw new Error(`Unknown agent: ${agentName}`);
+
+  const model = agent.model;
+  const startTime = Date.now();
+
+  const response = await fetch(`${LLM_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${LLM_API_KEY}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://mind-mappr.com",
+      "X-Title": `MindMappr-${agent.name}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      max_tokens: maxTokens,
+      temperature: 0.7,
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`${agent.name} LLM error (${response.status}): ${errText.slice(0, 200)}`);
+  }
+
+  const data = await response.json();
+  const elapsed = Date.now() - startTime;
+  const text = data.choices?.[0]?.message?.content || "No response.";
+  const usage = data.usage || {};
+
+  // Update agent state
+  agentState[agentName].lastActivity = new Date().toISOString();
+  agentState[agentName].taskCount++;
+
+  return { text, usage, elapsed, model };
+}
+
+/**
+ * Invoke an agent with a user message, log to task history
+ */
+async function invokeAgent(agentName, userMessage, sessionId = null) {
+  const agent = AGENT_DEFINITIONS[agentName];
+  if (!agent) throw new Error(`Unknown agent: ${agentName}`);
+
+  // Rate limit check for Generator
+  if (agentName === "generator" && !canGenerate()) {
+    const callsThisHour = getGeneratorCallsThisHour();
+    return {
+      text: `Generator rate limit reached (${callsThisHour}/${GENERATOR_RATE_LIMIT} calls this hour). Please try again later.`,
+      agent: agentName,
+      rateLimited: true,
+    };
+  }
+
+  // Track generator calls
+  if (agentName === "generator") {
+    generatorCallTimestamps.push(Date.now());
+  }
+
+  // Mark agent as busy
+  agentState[agentName].status = "busy";
+
+  // Create task record
+  const taskResult = db.prepare(
+    "INSERT INTO agent_tasks (agent_name, task_type, input, status, session_id) VALUES (?, ?, ?, 'running', ?)"
+  ).run(agentName, "chat", userMessage.slice(0, 2000), sessionId);
+  const taskId = taskResult.lastInsertRowid;
+
+  try {
+    // Inject memory context for Rex
+    let systemPrompt = agent.systemPrompt;
+    if (agentName === "rex") {
+      const memCtx = getMemoryContext();
+      if (memCtx) systemPrompt += `\n\n[MEMORY — What you know about this user]\n${memCtx}`;
+    }
+
+    const messages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userMessage },
+    ];
+
+    const result = await callAgentLLM(agentName, messages);
+
+    // Estimate cost
+    const inputTokens = result.usage.prompt_tokens || 0;
+    const outputTokens = result.usage.completion_tokens || 0;
+    const pricingTable = {
+      "anthropic/claude-sonnet-4": { input: 3.0, output: 15.0 },
+      "anthropic/claude-3.5-haiku": { input: 0.8, output: 4.0 },
+      "mistralai/mistral-small": { input: 0.1, output: 0.3 },
+    };
+    const pricing = pricingTable[agent.model] || { input: 1.0, output: 3.0 };
+    const cost = (inputTokens * pricing.input + outputTokens * pricing.output) / 1000000;
+
+    // Update task record
+    db.prepare(
+      "UPDATE agent_tasks SET output = ?, status = 'completed', cost_estimate = ?, tokens_used = ?, elapsed_ms = ?, completed_at = datetime('now') WHERE id = ?"
+    ).run(result.text.slice(0, 5000), Math.round(cost * 100000) / 100000, inputTokens + outputTokens, result.elapsed, taskId);
+
+    agentState[agentName].status = "online";
+    agentState[agentName].totalCost += cost;
+
+    return {
+      text: result.text,
+      agent: agentName,
+      agentDisplay: agent.name,
+      cost: Math.round(cost * 100000) / 100000,
+      elapsed: result.elapsed,
+      tokens: inputTokens + outputTokens,
+      taskId,
+    };
+  } catch (err) {
+    // Update task record with error
+    db.prepare(
+      "UPDATE agent_tasks SET output = ?, status = 'failed', completed_at = datetime('now') WHERE id = ?"
+    ).run(err.message.slice(0, 2000), taskId);
+
+    agentState[agentName].status = "online";
+    throw err;
+  }
+}
+
+/**
+ * Parse @agent mentions from a message
+ * Returns { agentName: string|null, cleanMessage: string }
+ */
+function parseAgentMention(message) {
+  const mentionPattern = /^@(\w+)\s+/i;
+  const match = message.match(mentionPattern);
+  if (match) {
+    const mentioned = match[1].toLowerCase();
+    if (AGENT_DEFINITIONS[mentioned]) {
+      return { agentName: mentioned, cleanMessage: message.slice(match[0].length).trim() };
+    }
+  }
+  return { agentName: null, cleanMessage: message };
+}
+
+/**
+ * Parse delegation patterns from Rex's response
+ */
+function parseDelegations(text) {
+  const results = [];
+  const lines = text.split("\n");
+  for (const line of lines) {
+    const match = line.match(/DELEGATE:(\w+):(.+)/i);
+    if (match) {
+      const agent = match[1].trim().toLowerCase();
+      if (AGENT_DEFINITIONS[agent]) {
+        results.push({ agent, task: match[2].trim() });
+      }
+    }
+  }
+  return results;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // ── Middleware ───────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
-// ── URL rewrite: strip /mindmappr prefix for API and upload routes ─────────
 app.use((req, _res, next) => {
   if (req.url.startsWith("/mindmappr/api/") || req.url.startsWith("/mindmappr/api?")) {
     req.url = req.url.replace("/mindmappr", "");
@@ -185,7 +517,6 @@ app.use((req, _res, next) => {
 });
 app.use("/mindmappr", express.static(join(__dirname, "public")));
 app.use("/mindmappr/uploads", express.static(UPLOADS_DIR));
-// ── Root redirect ───────────────────────────────────────────────────────────
 app.get("/", (_, res) => res.redirect("/mindmappr"));
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -210,7 +541,6 @@ RULES:
    - send_slack: params: {message, channel?} — sends a Slack message (if connected)
 5. MULTI-STEP TASKS: For complex requests that need multiple tools, output a plan like this:
    <task_plan>[{"step":1,"tool":"elevenlabs_tts","params":{...},"description":"Generate voiceover"},{"step":2,"tool":"generate_image","params":{...},"description":"Create background image"},{"step":3,"tool":"create_video","params":{"audio_file":"{{step1.file}}","image_file":"{{step2.file}}"},"description":"Combine into video"}]</task_plan>
-   Use {{stepN.file}} to reference output files from previous steps.
 6. After a tool runs successfully, give a warm 1-2 sentence response saying the file is ready. No filenames, no code, no technical details.
 7. If a tool fails, say so plainly and offer to try another way.
 
@@ -431,7 +761,6 @@ async function executeTaskPlan(plan, progressCallback) {
 
     if (progressCallback) progressCallback(stepNum, plan.length, desc, "running");
 
-    // Resolve {{stepN.file}} references in params
     let paramsStr = JSON.stringify(step.params || {});
     for (const [key, val] of Object.entries(results)) {
       const ref = `{{${key}.file}}`;
@@ -478,15 +807,111 @@ async function executeTaskPlan(plan, progressCallback) {
 // ══════════════════════════════════════════════════════════════════════════════
 app.get("/api/health", (_, res) => res.json({
   status: "ok",
-  service: "MindMappr Agent v5",
-  version: "5.0.0",
-  features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler"],
+  service: "MindMappr Agent v6 — Command Center",
+  version: "6.0.0",
+  features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history"],
+  agents: Object.keys(AGENT_DEFINITIONS),
   ts: new Date().toISOString(),
   tools: ["elevenlabs_tts", "generate_image", "create_video", "create_pdf", "run_python", "web_scrape", "create_csv", "create_html", "send_slack"]
 }));
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ── Chat (v5 — with memory injection + multi-step + error recovery) ─────────
+// ── v6: Agent API Endpoints ─────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+// List all agents with status
+app.get("/api/agents", (_, res) => {
+  try {
+    const agents = Object.entries(AGENT_DEFINITIONS).map(([key, def]) => {
+      const state = agentState[key];
+      const recentTasks = db.prepare(
+        "SELECT COUNT(*) as count FROM agent_tasks WHERE agent_name = ? AND created_at > datetime('now', '-24 hours')"
+      ).get(key);
+      return {
+        id: key,
+        name: def.name,
+        model: def.model,
+        role: def.role,
+        description: def.description,
+        icon: def.icon,
+        color: def.color,
+        status: state.status,
+        lastActivity: state.lastActivity,
+        taskCount: state.taskCount,
+        tasksLast24h: recentTasks.count,
+        totalCost: Math.round(state.totalCost * 100000) / 100000,
+        ...(key === "generator" ? { callsThisHour: getGeneratorCallsThisHour(), rateLimit: GENERATOR_RATE_LIMIT } : {}),
+      };
+    });
+    res.json({ success: true, data: agents });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Invoke a specific agent directly
+app.post("/api/agents/:name/invoke", async (req, res) => {
+  try {
+    const agentName = req.params.name.toLowerCase();
+    const { message, sessionId } = req.body;
+    if (!message) return res.status(400).json({ success: false, error: "message required" });
+    if (!AGENT_DEFINITIONS[agentName]) return res.status(404).json({ success: false, error: `Unknown agent: ${agentName}` });
+
+    const result = await invokeAgent(agentName, message, sessionId);
+    res.json({ success: true, data: result });
+  } catch (e) {
+    console.error(`[Agent] ${req.params.name} error:`, e.message);
+    res.status(500).json({ success: false, error: friendlyError(e, req.params.name) });
+  }
+});
+
+// Task history
+app.get("/api/agent-tasks", (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 50;
+    const agent = req.query.agent;
+    let query = "SELECT * FROM agent_tasks";
+    const params = [];
+    if (agent) {
+      query += " WHERE agent_name = ?";
+      params.push(agent.toLowerCase());
+    }
+    query += " ORDER BY created_at DESC LIMIT ?";
+    params.push(limit);
+    const tasks = db.prepare(query).all(...params);
+    res.json({ success: true, data: tasks });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Task history stats
+app.get("/api/agent-tasks/stats", (_, res) => {
+  try {
+    const totalTasks = db.prepare("SELECT COUNT(*) as count FROM agent_tasks").get();
+    const completedTasks = db.prepare("SELECT COUNT(*) as count FROM agent_tasks WHERE status = 'completed'").get();
+    const failedTasks = db.prepare("SELECT COUNT(*) as count FROM agent_tasks WHERE status = 'failed'").get();
+    const totalCost = db.prepare("SELECT COALESCE(SUM(cost_estimate), 0) as total FROM agent_tasks").get();
+    const byAgent = db.prepare(
+      "SELECT agent_name, COUNT(*) as count, COALESCE(SUM(cost_estimate), 0) as cost FROM agent_tasks GROUP BY agent_name"
+    ).all();
+    res.json({
+      success: true,
+      data: {
+        total: totalTasks.count,
+        completed: completedTasks.count,
+        failed: failedTasks.count,
+        totalCost: Math.round(totalCost.total * 100000) / 100000,
+        byAgent,
+      },
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Chat (v6 — with agent routing + memory + multi-step + error recovery) ───
 // ══════════════════════════════════════════════════════════════════════════════
 app.post("/api/chat", async (req, res) => {
   try {
@@ -502,74 +927,144 @@ app.post("/api/chat", async (req, res) => {
       userContent += `\n\n[User attached: ${attachedFile.name} (${attachedFile.type}, ${Math.round((attachedFile.size || 0) / 1024)}KB). File is available at uploads/${attachedFile.name}]`;
     }
 
-    // v5: Inject long-term memory context
-    const memoryCtx = getMemoryContext();
-    const systemWithMemory = SYSTEM_PROMPT + (memoryCtx ? `\n\n[MEMORY — What you know about this user and their projects]\n${memoryCtx}` : "");
-
-    const msgs = [{ role: "system", content: systemWithMemory }, ...history.slice(-30), { role: "user", content: userContent }];
-    let reply = await callLLM(msgs, model);
-
-    // Handle retry failure from callLLM
-    if (reply && typeof reply === "object" && reply.success === false) {
-      return res.json({ success: true, data: { reply: reply.error, sessionId: sid, generatedFile: null } });
-    }
-
+    // v6: Check for @agent mention
+    const { agentName, cleanMessage } = parseAgentMention(userContent);
+    let reply = "";
     let generatedFile = null;
     let planProgress = null;
+    let respondingAgent = null;
 
-    // v5: Check for multi-step task plan first
-    const plan = parseTaskPlan(reply);
-    if (plan && plan.length > 1) {
-      const planResult = await executeTaskPlan(plan);
-      if (planResult.success && planResult.files.length > 0) {
-        const lastFile = planResult.files[planResult.files.length - 1];
-        generatedFile = { name: lastFile.name, type: lastFile.type, message: lastFile.message };
-        planProgress = { steps: plan.map((s, i) => ({ step: s.step || i + 1, description: s.description, status: "done" })) };
-        // Get warm response
-        const fu = await callLLM([
-          { role: "system", content: SYSTEM_PROMPT },
-          ...history.slice(-10),
-          { role: "user", content: userContent },
-          { role: "assistant", content: reply },
-          { role: "user", content: `All ${planResult.totalSteps} steps completed successfully! Final file: ${lastFile.name}. ${lastFile.message}. Give a warm 1-2 sentence response saying everything is ready. Mention what was created. No filenames, no code.` }
-        ], model);
-        reply = (typeof fu === "string" ? fu : "All done!").replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "").replace(/<task_plan>[\s\S]*?<\/task_plan>/g, "").trim();
-      } else if (!planResult.success) {
-        reply = `I got through ${planResult.completedSteps} of ${planResult.totalSteps} steps, but hit a snag: ${planResult.error}. Want me to try a different approach?`;
-        if (planResult.files.length > 0) {
-          const lastFile = planResult.files[planResult.files.length - 1];
-          generatedFile = { name: lastFile.name, type: lastFile.type, message: lastFile.message };
+    if (agentName) {
+      // Direct agent invocation via @mention
+      try {
+        const agentResult = await invokeAgent(agentName, cleanMessage, sid);
+        reply = agentResult.text;
+        respondingAgent = { name: AGENT_DEFINITIONS[agentName].name, icon: AGENT_DEFINITIONS[agentName].icon, id: agentName };
+
+        // Check if Rex delegated to other agents
+        if (agentName === "rex") {
+          const delegations = parseDelegations(reply);
+          if (delegations.length > 0) {
+            let delegationResults = [];
+            for (const d of delegations) {
+              try {
+                const dResult = await invokeAgent(d.agent, d.task, sid);
+                delegationResults.push(`**${AGENT_DEFINITIONS[d.agent].name}** ${AGENT_DEFINITIONS[d.agent].icon}: ${dResult.text}`);
+              } catch (err) {
+                delegationResults.push(`**${AGENT_DEFINITIONS[d.agent].name}**: Error — ${err.message}`);
+              }
+            }
+            // Clean delegation markers from Rex's reply
+            reply = reply.replace(/DELEGATE:\w+:.+/gi, "").trim();
+            if (delegationResults.length > 0) {
+              reply += "\n\n---\n" + delegationResults.join("\n\n");
+            }
+          }
         }
+      } catch (err) {
+        reply = `${AGENT_DEFINITIONS[agentName].name} ran into an issue: ${friendlyError(err, AGENT_DEFINITIONS[agentName].name)}`;
+        respondingAgent = { name: AGENT_DEFINITIONS[agentName].name, icon: AGENT_DEFINITIONS[agentName].icon, id: agentName };
       }
     } else {
-      // Single tool call (v4 behavior preserved)
-      const tc = parseToolCall(reply);
-      if (tc) {
-        const result = await executeTool(tc.tool, tc.params || {});
-        if (result.success && result.file) {
-          generatedFile = { name: result.file, type: result.type, message: result.message };
-          const fu = await callLLM([
-            { role: "system", content: SYSTEM_PROMPT },
-            ...history.slice(-10),
-            { role: "user", content: userContent },
-            { role: "assistant", content: reply },
-            { role: "user", content: `Done. File created: ${result.file}. ${result.message}. Give a warm 1-2 sentence plain response saying it is ready. No filenames, no code, no technical details.` }
-          ], model);
-          reply = (typeof fu === "string" ? fu : "Your file is ready!").replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "").trim();
-        } else if (result.success && result.output) {
-          const fu = await callLLM([
-            { role: "system", content: SYSTEM_PROMPT },
-            ...history.slice(-10),
-            { role: "user", content: userContent },
-            { role: "assistant", content: reply },
-            { role: "user", content: `Code ran. Output: ${result.output.slice(0, 800)}. Summarize the result warmly in 1-3 sentences.` }
-          ], model);
-          reply = (typeof fu === "string" ? fu : "Done!").replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "").trim();
-        } else if (!result.success) {
-          reply = `I hit a snag: ${result.error}. Want me to try another approach?`;
+      // No agent mentioned — use existing MindMappr flow (tool execution)
+      // But first, check if Rex should route this
+      const isAgentQuestion = /\b(agent|rex|watcher|scheduler|processor|generator|status|brief|monitor|delegate)\b/i.test(userContent);
+
+      if (isAgentQuestion) {
+        // Route through Rex
+        try {
+          const rexResult = await invokeAgent("rex", userContent, sid);
+          reply = rexResult.text;
+          respondingAgent = { name: "Rex", icon: "🧠", id: "rex" };
+
+          // Handle delegations
+          const delegations = parseDelegations(reply);
+          if (delegations.length > 0) {
+            let delegationResults = [];
+            for (const d of delegations) {
+              try {
+                const dResult = await invokeAgent(d.agent, d.task, sid);
+                delegationResults.push(`**${AGENT_DEFINITIONS[d.agent].name}** ${AGENT_DEFINITIONS[d.agent].icon}: ${dResult.text}`);
+              } catch (err) {
+                delegationResults.push(`**${AGENT_DEFINITIONS[d.agent].name}**: Error — ${err.message}`);
+              }
+            }
+            reply = reply.replace(/DELEGATE:\w+:.+/gi, "").trim();
+            if (delegationResults.length > 0) {
+              reply += "\n\n---\n" + delegationResults.join("\n\n");
+            }
+          }
+        } catch (err) {
+          reply = `Rex ran into an issue: ${friendlyError(err, "Rex")}`;
+          respondingAgent = { name: "Rex", icon: "🧠", id: "rex" };
         }
       } else {
-        reply = (typeof reply === "string" ? reply : "").replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "").replace(/<task_plan>[\s\S]*?<\/task_plan>/g, "").trim();
+        // Standard MindMappr tool execution flow (v5 behavior preserved)
+        const memoryCtx = getMemoryContext();
+        const systemWithMemory = SYSTEM_PROMPT + (memoryCtx ? `\n\n[MEMORY — What you know about this user and their projects]\n${memoryCtx}` : "");
+
+        const msgs = [{ role: "system", content: systemWithMemory }, ...history.slice(-30), { role: "user", content: userContent }];
+        reply = await callLLM(msgs, model);
+
+        // Handle retry failure from callLLM
+        if (reply && typeof reply === "object" && reply.success === false) {
+          return res.json({ success: true, data: { reply: reply.error, sessionId: sid, generatedFile: null } });
+        }
+
+        // v5: Check for multi-step task plan first
+        const plan = parseTaskPlan(reply);
+        if (plan && plan.length > 1) {
+          const planResult = await executeTaskPlan(plan);
+          if (planResult.success && planResult.files.length > 0) {
+            const lastFile = planResult.files[planResult.files.length - 1];
+            generatedFile = { name: lastFile.name, type: lastFile.type, message: lastFile.message };
+            planProgress = { steps: plan.map((s, i) => ({ step: s.step || i + 1, description: s.description, status: "done" })) };
+            const fu = await callLLM([
+              { role: "system", content: SYSTEM_PROMPT },
+              ...history.slice(-10),
+              { role: "user", content: userContent },
+              { role: "assistant", content: reply },
+              { role: "user", content: `All ${planResult.totalSteps} steps completed successfully! Final file: ${lastFile.name}. ${lastFile.message}. Give a warm 1-2 sentence response saying everything is ready. Mention what was created. No filenames, no code.` }
+            ], model);
+            reply = (typeof fu === "string" ? fu : "All done!").replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "").replace(/<task_plan>[\s\S]*?<\/task_plan>/g, "").trim();
+          } else if (!planResult.success) {
+            reply = `I got through ${planResult.completedSteps} of ${planResult.totalSteps} steps, but hit a snag: ${planResult.error}. Want me to try a different approach?`;
+            if (planResult.files.length > 0) {
+              const lastFile = planResult.files[planResult.files.length - 1];
+              generatedFile = { name: lastFile.name, type: lastFile.type, message: lastFile.message };
+            }
+          }
+        } else {
+          // Single tool call (v4 behavior preserved)
+          const tc = parseToolCall(reply);
+          if (tc) {
+            const result = await executeTool(tc.tool, tc.params || {});
+            if (result.success && result.file) {
+              generatedFile = { name: result.file, type: result.type, message: result.message };
+              const fu = await callLLM([
+                { role: "system", content: SYSTEM_PROMPT },
+                ...history.slice(-10),
+                { role: "user", content: userContent },
+                { role: "assistant", content: reply },
+                { role: "user", content: `Done. File created: ${result.file}. ${result.message}. Give a warm 1-2 sentence plain response saying it is ready. No filenames, no code, no technical details.` }
+              ], model);
+              reply = (typeof fu === "string" ? fu : "Your file is ready!").replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "").trim();
+            } else if (result.success && result.output) {
+              const fu = await callLLM([
+                { role: "system", content: SYSTEM_PROMPT },
+                ...history.slice(-10),
+                { role: "user", content: userContent },
+                { role: "assistant", content: reply },
+                { role: "user", content: `Code ran. Output: ${result.output.slice(0, 800)}. Summarize the result warmly in 1-3 sentences.` }
+              ], model);
+              reply = (typeof fu === "string" ? fu : "Done!").replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "").trim();
+            } else if (!result.success) {
+              reply = `I hit a snag: ${result.error}. Want me to try another approach?`;
+            }
+          } else {
+            reply = (typeof reply === "string" ? reply : "").replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "").replace(/<task_plan>[\s\S]*?<\/task_plan>/g, "").trim();
+          }
+        }
       }
     }
 
@@ -582,11 +1077,12 @@ app.post("/api/chat", async (req, res) => {
 
     // Analytics
     const analytics = loadData("analytics");
-    analytics.push({ ts: Date.now(), type: "chat", sessionId: sid });
+    analytics.push({ ts: Date.now(), type: "chat", sessionId: sid, agent: respondingAgent?.id || null });
     saveData("analytics", analytics.slice(-10000));
 
     const responseData = { reply, sessionId: sid, generatedFile };
     if (planProgress) responseData.planProgress = planProgress;
+    if (respondingAgent) responseData.respondingAgent = respondingAgent;
 
     res.json({ success: true, data: responseData });
   } catch (e) {
@@ -859,10 +1355,14 @@ function startCronJob(task) {
     console.log(`[Cron] Running task ${task.id}: ${task.name}`);
     try {
       const config = JSON.parse(task.task_config);
-      if (task.task_type === "tool") {
+
+      // v6: If task has an assigned agent, route to that agent
+      if (task.assigned_agent && AGENT_DEFINITIONS[task.assigned_agent]) {
+        const agentMessage = config.message || `Execute scheduled task: ${task.name}`;
+        await invokeAgent(task.assigned_agent, agentMessage);
+      } else if (task.task_type === "tool") {
         await executeTool(config.tool, config.params || {});
       } else if (task.task_type === "chat") {
-        // Send a message to the LLM and execute any tool calls
         const msgs = [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: config.message }];
         const reply = await callLLM(msgs);
         if (typeof reply === "string") {
@@ -887,7 +1387,7 @@ function startCronJob(task) {
 // Cron API endpoints
 app.post("/api/schedule", (req, res) => {
   try {
-    const { name, cron_expression, task_type, task_config } = req.body;
+    const { name, cron_expression, task_type, task_config, assigned_agent } = req.body;
     if (!name || !cron_expression || !task_type || !task_config) {
       return res.status(400).json({ success: false, error: "name, cron_expression, task_type, and task_config are required" });
     }
@@ -895,7 +1395,8 @@ app.post("/api/schedule", (req, res) => {
       return res.status(400).json({ success: false, error: "Invalid cron expression. Use format like '0 9 * * *' (every day at 9am)." });
     }
     const configStr = typeof task_config === "string" ? task_config : JSON.stringify(task_config);
-    const result = db.prepare("INSERT INTO scheduled_tasks (name, cron_expression, task_type, task_config) VALUES (?, ?, ?, ?)").run(name, cron_expression, task_type, configStr);
+    const agentStr = assigned_agent && AGENT_DEFINITIONS[assigned_agent] ? assigned_agent : null;
+    const result = db.prepare("INSERT INTO scheduled_tasks (name, cron_expression, task_type, task_config, assigned_agent) VALUES (?, ?, ?, ?, ?)").run(name, cron_expression, task_type, configStr, agentStr);
     const task = db.prepare("SELECT * FROM scheduled_tasks WHERE id = ?").get(result.lastInsertRowid);
     startCronJob(task);
     res.json({ success: true, data: task });
@@ -951,6 +1452,7 @@ app.get("/mindmappr/*", (req, res) => {
 // ── Start ───────────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 app.listen(PORT, () => {
-  console.log(`MindMappr Agent v5 running on port ${PORT}`);
+  console.log(`MindMappr Agent v6 — Command Center running on port ${PORT}`);
+  console.log(`Agents online: ${Object.values(AGENT_DEFINITIONS).map(a => a.name).join(", ")}`);
   loadAndStartSchedules();
 });

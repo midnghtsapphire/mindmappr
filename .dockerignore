@@ -1,5 +1,7 @@
 node_modules/
 dist/
 .git/
-*.md
+AGENTS.md
+REVIEW_NOTES.md
+README.md
 .gitignore

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>MindMappr — AI Agent</title>
+  <title>MindMappr — Command Center</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>
@@ -67,6 +67,9 @@
     .msg.assistant .bubble { background: var(--surface2); color: var(--text); border-bottom-left-radius: 4px; }
     .bubble p { margin-bottom: 8px; } .bubble p:last-child { margin-bottom: 0; }
 
+    /* agent badge on messages */
+    .agent-badge-msg { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; margin-bottom: 6px; }
+
     /* file cards in chat */
     .file-card { margin-top: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
     .file-card img { max-width: 100%; max-height: 260px; display: block; object-fit: contain; background: #000; }
@@ -99,8 +102,17 @@
     .plan-step-text { color: var(--text2); }
     .plan-step.done .plan-step-text { color: var(--text); }
 
+    /* @mention autocomplete */
+    .mention-popup { position: absolute; bottom: 100%; left: 60px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 6px; display: none; z-index: 100; box-shadow: 0 -4px 20px rgba(0,0,0,.4); min-width: 220px; }
+    .mention-popup.show { display: block; }
+    .mention-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; cursor: pointer; transition: background .1s; font-size: 13px; }
+    .mention-item:hover, .mention-item.selected { background: var(--surface2); }
+    .mention-icon { font-size: 16px; }
+    .mention-name { font-weight: 600; }
+    .mention-role { font-size: 11px; color: var(--text2); }
+
     /* input bar */
-    .input-bar { padding: 12px 16px; border-top: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; gap: 8px; }
+    .input-bar { padding: 12px 16px; border-top: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; gap: 8px; position: relative; }
     .pending-file { display: flex; align-items: center; gap: 8px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; }
     .pending-file span { font-size: 12px; color: var(--text2); flex: 1; }
     .pending-file button { background: none; border: none; color: var(--text2); cursor: pointer; font-size: 16px; }
@@ -140,7 +152,7 @@
     .form-label { font-size: 13px; font-weight: 500; color: var(--text2); margin-bottom: 6px; display: block; }
     .form-input { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; color: var(--text); font-family: inherit; font-size: 14px; outline: none; transition: border-color .15s; }
     .form-input:focus { border-color: var(--accent); }
-    .form-select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%239090b0' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; }
+    .form-select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%239090b0' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 32px; }
     .btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: white; border: none; border-radius: 8px; padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer; transition: opacity .15s; }
     .btn-primary:hover { opacity: .9; }
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; }
@@ -150,6 +162,7 @@
     .badge-green { background: rgba(16,185,129,.2); color: var(--green); }
     .badge-yellow { background: rgba(245,158,11,.2); color: var(--yellow); }
     .badge-red { background: rgba(233,69,96,.2); color: var(--accent); }
+    .badge-blue { background: rgba(59,130,246,.2); color: #60a5fa; }
     .api-list { margin-top: 20px; }
 
     /* ── Connections panel ── */
@@ -193,6 +206,47 @@
     .toggle-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--text2); border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer; font-weight: 500; }
     .toggle-btn.active { background: rgba(16,185,129,.2); border-color: var(--green); color: var(--green); }
 
+    /* ── v6: Agents panel ── */
+    .agents-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+    .agent-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; transition: border-color .2s, transform .15s; }
+    .agent-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .agent-card-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .agent-icon { font-size: 28px; width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+    .agent-name { font-size: 16px; font-weight: 700; }
+    .agent-model { font-size: 11px; color: var(--text2); font-family: monospace; }
+    .agent-role { font-size: 13px; color: var(--text2); margin-bottom: 14px; line-height: 1.5; }
+    .agent-stats { display: flex; gap: 16px; margin-bottom: 14px; }
+    .agent-stat { text-align: center; }
+    .agent-stat-val { font-size: 18px; font-weight: 700; color: var(--text); }
+    .agent-stat-label { font-size: 10px; color: var(--text2); text-transform: uppercase; letter-spacing: .5px; }
+    .agent-footer { display: flex; align-items: center; justify-content: space-between; }
+    .agent-last-active { font-size: 11px; color: var(--text2); }
+    .agent-status-dot { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; }
+    .agent-status-dot::before { content: ''; width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .agent-status-dot.online::before { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .agent-status-dot.busy::before { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
+    .agent-status-dot.offline::before { background: var(--text2); }
+    .agent-invoke-btn { background: none; border: 1px solid var(--border); color: var(--text2); border-radius: 6px; padding: 5px 12px; font-size: 12px; cursor: pointer; font-weight: 500; transition: all .15s; }
+    .agent-invoke-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ── v6: Task History panel ── */
+    .task-history-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+    .task-filter { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 7px 12px; color: var(--text); font-family: inherit; font-size: 13px; outline: none; }
+    .task-filter:focus { border-color: var(--accent); }
+    .task-list { display: flex; flex-direction: column; gap: 8px; }
+    .task-row { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; display: flex; gap: 14px; align-items: flex-start; transition: border-color .15s; cursor: pointer; }
+    .task-row:hover { border-color: var(--accent); }
+    .task-row-agent { font-size: 20px; width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .task-row-body { flex: 1; min-width: 0; }
+    .task-row-top { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .task-row-agent-name { font-size: 13px; font-weight: 600; }
+    .task-row-type { font-size: 11px; color: var(--text2); }
+    .task-row-input { font-size: 13px; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .task-row-output { font-size: 12px; color: var(--text); margin-top: 6px; line-height: 1.5; max-height: 0; overflow: hidden; transition: max-height .3s; }
+    .task-row.expanded .task-row-output { max-height: 400px; overflow-y: auto; }
+    .task-row-meta { display: flex; gap: 12px; margin-top: 6px; font-size: 11px; color: var(--text2); }
+    .task-stats-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
+
     /* scrollbar */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -203,12 +257,18 @@
     #toast.show { opacity: 1; transform: translateY(0); }
     #toast.success { border-color: var(--green); }
     #toast.error { border-color: var(--accent); }
+
+    @media (max-width: 768px) {
+      .sessions-sidebar { display: none; }
+      .agents-grid { grid-template-columns: 1fr; }
+      .task-stats-row { grid-template-columns: repeat(2, 1fr); }
+    }
   </style>
 </head>
 <body>
 
 <div class="topbar">
-  <span class="logo">MindMappr<span class="logo-sub">Agent v5</span></span>
+  <span class="logo">MindMappr<span class="logo-sub">Command Center v6</span></span>
   <span style="flex:1"></span>
   <span class="status-label" id="statusLabel">Connected</span>
   <span class="status-dot" id="statusDot"></span>
@@ -216,6 +276,8 @@
 
 <div class="tabs">
   <div class="tab active" data-tab="chat">Chat</div>
+  <div class="tab" data-tab="agents">Agents</div>
+  <div class="tab" data-tab="history">Task History</div>
   <div class="tab" data-tab="files">Files</div>
   <div class="tab" data-tab="schedules">Schedules</div>
   <div class="tab" data-tab="connections">Connections</div>
@@ -238,6 +300,7 @@
       <div class="chat-area">
         <div class="messages" id="messages"></div>
         <div class="input-bar">
+          <div id="mentionPopup" class="mention-popup"></div>
           <div id="pendingFileBar" style="display:none" class="pending-file">
             <span>📎</span><span id="pendingFileName" style="flex:1"></span>
             <button onclick="clearPendingFile()">✕</button>
@@ -245,12 +308,47 @@
           <div class="input-row">
             <button class="attach-btn" onclick="document.getElementById('fileInput').click()" title="Attach file">📎</button>
             <input type="file" id="fileInput" style="display:none" onchange="handleFileSelect(event)">
-            <textarea class="chat-input" id="chatInput" placeholder="Ask me to do something… generate audio, create images, build documents, run code, or complex multi-step tasks…" rows="1"
-              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage();}"
-              oninput="autoResize(this)"></textarea>
+            <textarea class="chat-input" id="chatInput" placeholder="Message agents with @Rex, @Watcher, @Processor, @Generator, @Scheduler — or just type and Rex will route it…" rows="1"
+              onkeydown="handleInputKeydown(event)"
+              oninput="handleInputChange(this)"></textarea>
             <button class="send-btn" id="sendBtn" onclick="sendMessage()">Send</button>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── AGENTS (v6) ── -->
+  <div class="panel" id="panel-agents">
+    <div class="panel-inner">
+      <div class="panel-title">Agent Command Center</div>
+      <div class="panel-sub">5 specialized AI agents — click any agent to chat with them directly</div>
+      <div id="agentsGrid" class="agents-grid">
+        <div style="color:var(--text2);font-size:13px">Loading agents…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TASK HISTORY (v6) ── -->
+  <div class="panel" id="panel-history">
+    <div class="panel-inner">
+      <div class="panel-title">Task History</div>
+      <div class="panel-sub">Everything your agents have done, when, and the result</div>
+      <div class="task-stats-row" id="taskStatsRow">
+        <div style="color:var(--text2);font-size:13px">Loading…</div>
+      </div>
+      <div class="task-history-header">
+        <select class="task-filter" id="taskAgentFilter" onchange="loadTaskHistory()">
+          <option value="">All Agents</option>
+          <option value="rex">Rex</option>
+          <option value="watcher">Watcher</option>
+          <option value="scheduler">Scheduler</option>
+          <option value="processor">Processor</option>
+          <option value="generator">Generator</option>
+        </select>
+      </div>
+      <div id="taskList" class="task-list">
+        <div style="color:var(--text2);font-size:13px">Loading…</div>
       </div>
     </div>
   </div>
@@ -264,17 +362,17 @@
     </div>
   </div>
 
-  <!-- ── SCHEDULES (v5) ── -->
+  <!-- ── SCHEDULES (v5 enhanced with agent assignment) ── -->
   <div class="panel" id="panel-schedules">
     <div class="panel-inner">
       <div class="panel-title">Scheduled Tasks</div>
-      <div class="panel-sub">Set up recurring tasks that MindMappr runs automatically</div>
+      <div class="panel-sub">Set up recurring tasks — assign to specific agents or let MindMappr decide</div>
       <div class="card" style="margin-bottom:20px">
         <div class="card-title">Create a Scheduled Task</div>
         <div style="margin-top:14px">
           <div class="form-group">
             <label class="form-label">Task Name</label>
-            <input class="form-input" id="schedName" placeholder="e.g. Daily report">
+            <input class="form-input" id="schedName" placeholder="e.g. Morning brief, Check GitHub repos">
           </div>
           <div style="display:flex;gap:10px">
             <div style="flex:1" class="form-group">
@@ -293,17 +391,30 @@
               <input class="form-input" id="schedCron" placeholder="0 9 * * *" style="font-family:monospace">
             </div>
           </div>
-          <div class="form-group">
-            <label class="form-label">Task Type</label>
-            <select class="form-input form-select" id="schedType" onchange="toggleSchedFields()">
-              <option value="chat">Chat message (AI decides what to do)</option>
-              <option value="tool">Direct tool call</option>
-              <option value="webhook">Webhook URL</option>
-            </select>
+          <div style="display:flex;gap:10px">
+            <div style="flex:1" class="form-group">
+              <label class="form-label">Task Type</label>
+              <select class="form-input form-select" id="schedType" onchange="toggleSchedFields()">
+                <option value="chat">Chat message (AI decides what to do)</option>
+                <option value="tool">Direct tool call</option>
+                <option value="webhook">Webhook URL</option>
+              </select>
+            </div>
+            <div style="flex:1" class="form-group">
+              <label class="form-label">Assign to Agent</label>
+              <select class="form-input form-select" id="schedAgent">
+                <option value="">Auto (Rex decides)</option>
+                <option value="rex">Rex — Primary brain</option>
+                <option value="watcher">Watcher — Monitoring</option>
+                <option value="scheduler">Scheduler — Cron/briefs</option>
+                <option value="processor">Processor — Data processing</option>
+                <option value="generator">Generator — Content creation</option>
+              </select>
+            </div>
           </div>
           <div class="form-group" id="schedChatGroup">
             <label class="form-label">Message to send</label>
-            <input class="form-input" id="schedMessage" placeholder="e.g. Scrape my website and check if it's up">
+            <input class="form-input" id="schedMessage" placeholder="e.g. Check my GitHub repos and summarize activity">
           </div>
           <div class="form-group" id="schedToolGroup" style="display:none">
             <label class="form-label">Tool config (JSON)</label>
@@ -393,6 +504,18 @@ const APIBASE = '/mindmappr/api';
 let sessionId = localStorage.getItem('mm_session') || null;
 let pendingFile = null;
 let isLoading = false;
+let mentionSelectedIdx = -1;
+
+// Agent metadata cache
+let agentsCache = [];
+
+const AGENTS_META = {
+  rex:       { name: 'Rex',       icon: '\u{1F9E0}', color: '#e94560' },
+  watcher:   { name: 'Watcher',   icon: '\u{1F441}\uFE0F', color: '#10b981' },
+  scheduler: { name: 'Scheduler', icon: '\u{1F4C5}', color: '#f59e0b' },
+  processor: { name: 'Processor', icon: '\u26A1',    color: '#7c3aed' },
+  generator: { name: 'Generator', icon: '\u270D\uFE0F', color: '#ec4899' },
+};
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, type='') {
@@ -413,6 +536,8 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (tab.dataset.tab === 'apis') loadApis();
     if (tab.dataset.tab === 'analytics') loadAnalytics();
     if (tab.dataset.tab === 'schedules') loadSchedules();
+    if (tab.dataset.tab === 'agents') loadAgents();
+    if (tab.dataset.tab === 'history') { loadTaskHistory(); loadTaskStats(); }
   });
 });
 
@@ -466,14 +591,23 @@ async function loadSession(sid) {
 
 // ── Chat ───────────────────────────────────────────────────────────────────
 function addWelcomeMsg() {
-  appendMsg('assistant', "Hey! I'm MindMappr v5 — your AI execution agent. I can handle complex multi-step tasks now, and I remember what we've talked about. Tell me what you need done — generate audio, create images, build documents, run code, scrape websites, make spreadsheets, and more. What can I make for you today?");
+  appendMsg('assistant', "Hey! I'm MindMappr v6 — your AI command center with 5 specialized agents.\n\nType @Rex, @Watcher, @Scheduler, @Processor, or @Generator to talk to a specific agent. Or just type normally and Rex will route your message to the right agent.\n\nI can handle complex multi-step tasks, remember our conversations, generate audio, create images, build documents, run code, and more. What can I help with?");
 }
 
-function appendMsg(role, text, fileData, planProgress) {
+function appendMsg(role, text, fileData, planProgress, respondingAgent) {
   const msgs = document.getElementById('messages');
   const div = document.createElement('div');
   div.className = `msg ${role}`;
-  const avatar = role === 'user' ? '👤' : '✨';
+  let avatar = role === 'user' ? '\u{1F464}' : '\u2728';
+  let agentBadgeHtml = '';
+
+  if (respondingAgent && role === 'assistant') {
+    const meta = AGENTS_META[respondingAgent.id] || {};
+    avatar = meta.icon || respondingAgent.icon || '\u2728';
+    const bgColor = meta.color || '#e94560';
+    agentBadgeHtml = `<div class="agent-badge-msg" style="background:${bgColor}22;color:${bgColor}">${meta.icon || ''} ${respondingAgent.name}</div>`;
+  }
+
   let fileHtml = '';
   if (fileData) {
     fileHtml = buildFileCard(fileData.name, fileData.type);
@@ -484,7 +618,7 @@ function appendMsg(role, text, fileData, planProgress) {
       <div class="plan-progress-title">Task Progress</div>
       ${planProgress.steps.map(s => `
         <div class="plan-step ${s.status}">
-          <div class="plan-step-icon">${s.status === 'done' ? '✓' : s.status === 'running' ? '⟳' : '○'}</div>
+          <div class="plan-step-icon">${s.status === 'done' ? '\u2713' : s.status === 'running' ? '\u27F3' : '\u25CB'}</div>
           <div class="plan-step-text">Step ${s.step}: ${escHtml(s.description)}</div>
         </div>
       `).join('')}
@@ -493,6 +627,7 @@ function appendMsg(role, text, fileData, planProgress) {
   div.innerHTML = `
     <div class="avatar">${avatar}</div>
     <div>
+      ${agentBadgeHtml}
       <div class="bubble">${formatText(text)}</div>
       ${planHtml}
       ${fileHtml}
@@ -513,27 +648,127 @@ function buildFileCard(name, type) {
   } else if (type === 'video' || name.match(/\.mp4$/i)) {
     preview = `<video controls src="${previewUrl}" style="max-height:200px"></video>`;
   } else {
-    const icons = { document: '📄', csv: '📊', html: '🌐', pdf: '📕', zip: '📦' };
-    preview = `<div class="file-icon">${icons[type] || '📎'}</div>`;
+    const icons = { document: '\u{1F4C4}', csv: '\u{1F4CA}', html: '\u{1F310}', pdf: '\u{1F4D5}', zip: '\u{1F4E6}' };
+    preview = `<div class="file-icon">${icons[type] || '\u{1F4CE}'}</div>`;
   }
   return `<div class="file-card">
     ${preview}
     <div class="file-card-footer">
-      <span class="file-card-name">📎 ${escHtml(name)}</span>
+      <span class="file-card-name">\u{1F4CE} ${escHtml(name)}</span>
       <a class="btn-dl" href="${dlUrl}" download="${escHtml(name)}">Download</a>
     </div>
   </div>`;
 }
 
-function showTyping() {
+function showTyping(agentInfo) {
   const msgs = document.getElementById('messages');
   const div = document.createElement('div');
   div.className = 'msg assistant'; div.id = 'typing-indicator';
-  div.innerHTML = `<div class="avatar">✨</div><div class="bubble"><div class="typing"><span></span><span></span><span></span></div></div>`;
+  let avatar = '\u2728';
+  let label = '';
+  if (agentInfo) {
+    const meta = AGENTS_META[agentInfo] || {};
+    avatar = meta.icon || '\u2728';
+    label = `<div style="font-size:11px;color:var(--text2);margin-bottom:4px">${meta.name || agentInfo} is thinking…</div>`;
+  }
+  div.innerHTML = `<div class="avatar">${avatar}</div><div>${label}<div class="bubble"><div class="typing"><span></span><span></span><span></span></div></div></div>`;
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
 }
 function hideTyping() { document.getElementById('typing-indicator')?.remove(); }
+
+// ── @mention autocomplete ──────────────────────────────────────────────────
+function handleInputChange(el) {
+  autoResize(el);
+  const val = el.value;
+  const cursorPos = el.selectionStart;
+  const textBeforeCursor = val.slice(0, cursorPos);
+  const mentionMatch = textBeforeCursor.match(/@(\w*)$/);
+
+  if (mentionMatch) {
+    const query = mentionMatch[1].toLowerCase();
+    const agents = Object.entries(AGENTS_META).filter(([key, a]) =>
+      key.startsWith(query) || a.name.toLowerCase().startsWith(query)
+    );
+    if (agents.length > 0) {
+      showMentionPopup(agents, mentionMatch.index, mentionMatch[0].length);
+      return;
+    }
+  }
+  hideMentionPopup();
+}
+
+function showMentionPopup(agents, matchStart, matchLen) {
+  const popup = document.getElementById('mentionPopup');
+  mentionSelectedIdx = 0;
+  popup.innerHTML = agents.map(([key, a], i) => `
+    <div class="mention-item ${i === 0 ? 'selected' : ''}" data-agent="${key}" onclick="selectMention('${key}')">
+      <span class="mention-icon">${a.icon}</span>
+      <div>
+        <div class="mention-name">${a.name}</div>
+      </div>
+    </div>
+  `).join('');
+  popup.classList.add('show');
+  popup._agents = agents;
+  popup._matchStart = matchStart;
+  popup._matchLen = matchLen;
+}
+
+function hideMentionPopup() {
+  document.getElementById('mentionPopup').classList.remove('show');
+  mentionSelectedIdx = -1;
+}
+
+function selectMention(agentKey) {
+  const input = document.getElementById('chatInput');
+  const popup = document.getElementById('mentionPopup');
+  const matchStart = popup._matchStart;
+  const matchLen = popup._matchLen;
+  const before = input.value.slice(0, matchStart);
+  const after = input.value.slice(matchStart + matchLen);
+  const name = AGENTS_META[agentKey].name;
+  input.value = before + '@' + name + ' ' + after;
+  input.focus();
+  const newPos = matchStart + name.length + 2;
+  input.setSelectionRange(newPos, newPos);
+  hideMentionPopup();
+}
+
+function handleInputKeydown(event) {
+  const popup = document.getElementById('mentionPopup');
+  if (popup.classList.contains('show')) {
+    const items = popup.querySelectorAll('.mention-item');
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      mentionSelectedIdx = Math.min(mentionSelectedIdx + 1, items.length - 1);
+      items.forEach((it, i) => it.classList.toggle('selected', i === mentionSelectedIdx));
+      return;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      mentionSelectedIdx = Math.max(mentionSelectedIdx - 1, 0);
+      items.forEach((it, i) => it.classList.toggle('selected', i === mentionSelectedIdx));
+      return;
+    }
+    if (event.key === 'Tab' || event.key === 'Enter') {
+      if (mentionSelectedIdx >= 0 && items[mentionSelectedIdx]) {
+        event.preventDefault();
+        const agentKey = items[mentionSelectedIdx].dataset.agent;
+        selectMention(agentKey);
+        return;
+      }
+    }
+    if (event.key === 'Escape') {
+      hideMentionPopup();
+      return;
+    }
+  }
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    sendMessage();
+  }
+}
 
 async function sendMessage() {
   if (isLoading) return;
@@ -542,6 +777,7 @@ async function sendMessage() {
   if (!text && !pendingFile) return;
   isLoading = true;
   document.getElementById('sendBtn').disabled = true;
+  hideMentionPopup();
 
   let userText = text;
   if (pendingFile) userText += (text ? '\n' : '') + `[Attached: ${pendingFile.name}]`;
@@ -560,7 +796,15 @@ async function sendMessage() {
     clearPendingFile();
   }
 
-  showTyping();
+  // Detect which agent is being addressed for typing indicator
+  const mentionMatch = text.match(/^@(\w+)/i);
+  let typingAgent = null;
+  if (mentionMatch) {
+    const mentioned = mentionMatch[1].toLowerCase();
+    if (AGENTS_META[mentioned]) typingAgent = mentioned;
+  }
+  showTyping(typingAgent);
+
   try {
     const body = { message: text, sessionId };
     if (attachedFileMeta) body.attachedFile = attachedFileMeta;
@@ -570,7 +814,7 @@ async function sendMessage() {
     if (d.success) {
       sessionId = d.data.sessionId;
       localStorage.setItem('mm_session', sessionId);
-      appendMsg('assistant', d.data.reply, d.data.generatedFile, d.data.planProgress);
+      appendMsg('assistant', d.data.reply, d.data.generatedFile, d.data.planProgress, d.data.respondingAgent);
       loadSessions();
     } else {
       appendMsg('assistant', d.error || 'Something went wrong. Please try again.');
@@ -597,6 +841,133 @@ function clearPendingFile() {
   document.getElementById('pendingFileName').textContent = '';
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ── v6: Agents tab ──────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+async function loadAgents() {
+  const grid = document.getElementById('agentsGrid');
+  grid.innerHTML = '<div style="color:var(--text2);font-size:13px">Loading agents…</div>';
+  try {
+    const r = await fetch(`${APIBASE}/agents`);
+    const d = await r.json();
+    if (!d.success || !d.data || d.data.length === 0) {
+      grid.innerHTML = '<div class="empty-state"><div class="empty-icon">\u{1F916}</div><div>No agents found</div></div>';
+      return;
+    }
+    agentsCache = d.data;
+    grid.innerHTML = d.data.map(a => {
+      const statusClass = a.status === 'online' ? 'online' : a.status === 'busy' ? 'busy' : 'offline';
+      const statusLabel = a.status === 'online' ? 'Online' : a.status === 'busy' ? 'Busy' : 'Offline';
+      const rateInfo = a.rateLimit ? `<div style="font-size:11px;color:var(--text2);margin-top:4px">${a.callsThisHour}/${a.rateLimit} calls this hour</div>` : '';
+      return `<div class="agent-card" style="border-left: 3px solid ${a.color}">
+        <div class="agent-card-header">
+          <div class="agent-icon" style="background:${a.color}22">${a.icon}</div>
+          <div>
+            <div class="agent-name">${escHtml(a.name)}</div>
+            <div class="agent-model">${escHtml(a.model)}</div>
+          </div>
+        </div>
+        <div class="agent-role">${escHtml(a.description)}</div>
+        <div class="agent-stats">
+          <div class="agent-stat">
+            <div class="agent-stat-val">${a.taskCount}</div>
+            <div class="agent-stat-label">Tasks (session)</div>
+          </div>
+          <div class="agent-stat">
+            <div class="agent-stat-val">${a.tasksLast24h}</div>
+            <div class="agent-stat-label">Last 24h</div>
+          </div>
+          <div class="agent-stat">
+            <div class="agent-stat-val">$${a.totalCost.toFixed(4)}</div>
+            <div class="agent-stat-label">Cost (session)</div>
+          </div>
+        </div>
+        ${rateInfo}
+        <div class="agent-footer">
+          <div class="agent-last-active">Last active: ${timeAgo(a.lastActivity)}</div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="agent-status-dot ${statusClass}">${statusLabel}</span>
+            <button class="agent-invoke-btn" onclick="chatWithAgent('${a.id}')">Chat</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    grid.innerHTML = '<div style="color:var(--accent)">Error loading agents: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+function chatWithAgent(agentId) {
+  // Switch to chat tab and pre-fill @mention
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelector('[data-tab="chat"]').classList.add('active');
+  document.getElementById('panel-chat').classList.add('active');
+  const input = document.getElementById('chatInput');
+  const name = AGENTS_META[agentId]?.name || agentId;
+  input.value = '@' + name + ' ';
+  input.focus();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── v6: Task History tab ────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+async function loadTaskStats() {
+  try {
+    const r = await fetch(`${APIBASE}/agent-tasks/stats`);
+    const d = await r.json();
+    if (!d.success) return;
+    const s = d.data;
+    document.getElementById('taskStatsRow').innerHTML = `
+      <div class="stat-card"><div class="stat-num">${s.total}</div><div class="stat-label">Total Tasks</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:var(--green)">${s.completed}</div><div class="stat-label">Completed</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:var(--accent)">${s.failed}</div><div class="stat-label">Failed</div></div>
+      <div class="stat-card"><div class="stat-num" style="color:var(--yellow)">$${s.totalCost.toFixed(4)}</div><div class="stat-label">Total Cost</div></div>
+    `;
+  } catch(e) { console.error(e); }
+}
+
+async function loadTaskHistory() {
+  const list = document.getElementById('taskList');
+  list.innerHTML = '<div style="color:var(--text2);font-size:13px">Loading…</div>';
+  try {
+    const agent = document.getElementById('taskAgentFilter').value;
+    const url = agent ? `${APIBASE}/agent-tasks?agent=${agent}&limit=50` : `${APIBASE}/agent-tasks?limit=50`;
+    const r = await fetch(url);
+    const d = await r.json();
+    if (!d.success || !d.data || d.data.length === 0) {
+      list.innerHTML = '<div class="empty-state"><div class="empty-icon">\u{1F4CB}</div><div>No task history yet. Chat with an agent to see tasks here.</div></div>';
+      return;
+    }
+    list.innerHTML = d.data.map(t => {
+      const meta = AGENTS_META[t.agent_name] || { icon: '\u{1F916}', color: '#666', name: t.agent_name };
+      const statusBadge = t.status === 'completed' ? '<span class="badge badge-green">Completed</span>'
+        : t.status === 'failed' ? '<span class="badge badge-red">Failed</span>'
+        : '<span class="badge badge-yellow">Running</span>';
+      return `<div class="task-row" onclick="this.classList.toggle('expanded')">
+        <div class="task-row-agent" style="background:${meta.color}22">${meta.icon}</div>
+        <div class="task-row-body">
+          <div class="task-row-top">
+            <span class="task-row-agent-name" style="color:${meta.color}">${escHtml(meta.name)}</span>
+            ${statusBadge}
+            <span class="task-row-type">${escHtml(t.task_type)}</span>
+          </div>
+          <div class="task-row-input">${escHtml((t.input || '').slice(0, 120))}</div>
+          <div class="task-row-output">${t.output ? formatText(t.output.slice(0, 800)) : '<em style="color:var(--text2)">No output</em>'}</div>
+          <div class="task-row-meta">
+            <span>${timeAgo(t.created_at)}</span>
+            ${t.elapsed_ms ? '<span>' + t.elapsed_ms + 'ms</span>' : ''}
+            ${t.tokens_used ? '<span>' + t.tokens_used + ' tokens</span>' : ''}
+            ${t.cost_estimate ? '<span>$' + t.cost_estimate.toFixed(5) + '</span>' : ''}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    list.innerHTML = '<div style="color:var(--accent)">Error loading task history: ' + escHtml(e.message) + '</div>';
+  }
+}
+
 // ── Files tab ──────────────────────────────────────────────────────────────
 async function loadFiles() {
   const grid = document.getElementById('filesGrid');
@@ -605,7 +976,7 @@ async function loadFiles() {
     const r = await fetch(`${APIBASE}/files/list`);
     const d = await r.json();
     if (!d.data || d.data.length === 0) {
-      grid.innerHTML = '<div class="empty-state"><div class="empty-icon">📭</div><div>No files yet. Ask MindMappr to create something!</div></div>';
+      grid.innerHTML = '<div class="empty-state"><div class="empty-icon">\u{1F4ED}</div><div>No files yet. Ask MindMappr to create something!</div></div>';
       return;
     }
     grid.innerHTML = d.data.map(f => {
@@ -615,13 +986,13 @@ async function loadFiles() {
       if (f.type?.startsWith('image/')) {
         preview = `<img src="${previewUrl}" alt="${escHtml(f.name)}" loading="lazy">`;
       } else {
-        const icons = { 'audio/mpeg':'🎵','audio/wav':'🎵','video/mp4':'🎬','text/markdown':'📄','text/plain':'📄','text/csv':'📊','text/html':'🌐','application/pdf':'📕','application/zip':'📦','application/json':'📋' };
-        const icon = icons[f.type] || '📎';
+        const icons = { 'audio/mpeg':'\u{1F3B5}','audio/wav':'\u{1F3B5}','video/mp4':'\u{1F3AC}','text/markdown':'\u{1F4C4}','text/plain':'\u{1F4C4}','text/csv':'\u{1F4CA}','text/html':'\u{1F310}','application/pdf':'\u{1F4D5}','application/zip':'\u{1F4E6}','application/json':'\u{1F4CB}' };
+        const icon = icons[f.type] || '\u{1F4CE}';
         preview = `<div class="big-icon">${icon}</div>`;
       }
       const badge = f.creator === 'mindmappr'
-        ? '<span class="creator-badge creator-mindmappr">✨ Agent</span>'
-        : '<span class="creator-badge creator-user">👤 You</span>';
+        ? '<span class="creator-badge creator-mindmappr">\u2728 Agent</span>'
+        : '<span class="creator-badge creator-user">\u{1F464} You</span>';
       return `<div class="file-tile">
         <div class="file-tile-preview">${preview}</div>
         <div class="file-tile-info">
@@ -661,7 +1032,7 @@ async function loadConnections() {
         </div>
         <div class="conn-desc">${escHtml(c.description)}</div>
         ${c.connected
-          ? `<div class="conn-status ok">✓ ${escHtml(c.accountName || c.id)} · ${timeAgo(c.connectedAt)}</div>
+          ? `<div class="conn-status ok">\u2713 ${escHtml(c.accountName || c.id)} · ${timeAgo(c.connectedAt)}</div>
              <button class="btn-disconnect" onclick="disconnectService('${c.id}')">Disconnect</button>`
           : `<div class="conn-form">
                <input class="conn-input" id="tok-${c.id}" type="password" placeholder="${c.keyBased ? 'API Key or Token' : 'Access Token'}">
@@ -754,7 +1125,7 @@ async function loadAnalytics() {
   } catch(e) { console.error(e); }
 }
 
-// ── v5: Schedules ──────────────────────────────────────────────────────────
+// ── v5: Schedules (enhanced with agent assignment) ────────────────────────
 function applyCronPreset() {
   const v = document.getElementById('schedPreset').value;
   if (v) document.getElementById('schedCron').value = v;
@@ -771,6 +1142,7 @@ async function createSchedule() {
   const name = document.getElementById('schedName').value.trim();
   const cronExpr = document.getElementById('schedCron').value.trim();
   const taskType = document.getElementById('schedType').value;
+  const assignedAgent = document.getElementById('schedAgent').value || null;
   if (!name || !cronExpr) { toast('Name and schedule are required', 'error'); return; }
 
   let taskConfig;
@@ -790,7 +1162,7 @@ async function createSchedule() {
   const r = await fetch(`${APIBASE}/schedule`, {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ name, cron_expression: cronExpr, task_type: taskType, task_config: taskConfig })
+    body: JSON.stringify({ name, cron_expression: cronExpr, task_type: taskType, task_config: taskConfig, assigned_agent: assignedAgent })
   });
   const d = await r.json();
   if (d.success) {
@@ -809,19 +1181,22 @@ async function loadSchedules() {
     const r = await fetch(`${APIBASE}/schedules`);
     const d = await r.json();
     if (!d.data || d.data.length === 0) {
-      list.innerHTML = '<div class="empty-state"><div class="empty-icon">📅</div><div>No scheduled tasks yet. Create one above!</div></div>';
+      list.innerHTML = '<div class="empty-state"><div class="empty-icon">\u{1F4C5}</div><div>No scheduled tasks yet. Create one above!</div></div>';
       return;
     }
     list.innerHTML = d.data.map(s => {
       const config = typeof s.task_config === 'string' ? JSON.parse(s.task_config) : s.task_config;
       const desc = s.task_type === 'chat' ? config.message : s.task_type === 'webhook' ? config.url : `${config.tool}(...)`;
+      const agentMeta = s.assigned_agent ? AGENTS_META[s.assigned_agent] : null;
+      const agentBadge = agentMeta ? `<span style="display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:600;color:${agentMeta.color};background:${agentMeta.color}22;padding:1px 6px;border-radius:4px">${agentMeta.icon} ${agentMeta.name}</span>` : '';
       return `<div class="schedule-card ${s.enabled ? '' : 'disabled'}">
         <div class="schedule-info">
-          <div class="schedule-name">${escHtml(s.name)}</div>
+          <div class="schedule-name">${escHtml(s.name)} ${agentBadge}</div>
           <div class="schedule-meta">
             <span class="schedule-cron">${escHtml(s.cron_expression)}</span>
             · ${escHtml(s.task_type)} · ${escHtml(desc.slice(0, 60))}
             ${s.last_run ? ' · Last run: ' + timeAgo(s.last_run) : ''}
+            · Created: ${timeAgo(s.created_at)}
           </div>
         </div>
         <div class="schedule-actions">
@@ -860,6 +1235,7 @@ function formatText(t) {
   return escHtml(t)
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/---/g, '<hr style="border:none;border-top:1px solid var(--border);margin:10px 0">')
     .replace(/\n/g, '<br>');
 }
 function fmtSize(bytes) {
@@ -884,7 +1260,7 @@ async function init() {
     const r = await fetch(`${APIBASE}/health`);
     const d = await r.json();
     if (d.status === 'ok') {
-      document.getElementById('statusLabel').textContent = d.version ? `v${d.version} Ready` : 'Agent Ready';
+      document.getElementById('statusLabel').textContent = d.version ? `v${d.version} Ready` : 'Command Center Ready';
       document.getElementById('statusDot').style.background = 'var(--green)';
     }
   } catch(e) {
