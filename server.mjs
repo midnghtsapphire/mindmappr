@@ -222,7 +222,7 @@ Current date: ${new Date().toISOString().split('T')[0]}`,
   },
   watcher: {
     name: "Watcher",
-    model: "mistralai/mistral-small",
+    model: "anthropic/claude-sonnet-4-6",
     role: "Monitoring loop — health checks, anomaly detection, status reports",
     description: "Watcher monitors system health, checks for anomalies, tracks API spend, and reports on the status of all services and projects.",
     icon: "👁️",
@@ -247,7 +247,7 @@ Current date: ${new Date().toISOString().split('T')[0]}`,
   },
   scheduler: {
     name: "Scheduler",
-    model: "mistralai/mistral-small",
+    model: "anthropic/claude-sonnet-4-6",
     role: "Cron tasks — scheduling, morning briefs, recurring automation",
     description: "Scheduler manages recurring tasks, generates morning briefs, and handles all time-based automation within the system.",
     icon: "📅",
@@ -437,7 +437,7 @@ async function invokeAgent(agentName, userMessage, sessionId = null) {
     const pricingTable = {
       "anthropic/claude-sonnet-4": { input: 3.0, output: 15.0 },
       "anthropic/claude-3.5-haiku": { input: 0.8, output: 4.0 },
-      "mistralai/mistral-small": { input: 0.1, output: 0.3 },
+      "anthropic/claude-sonnet-4-6": { input: 0.1, output: 0.3 },
     };
     const pricing = pricingTable[agent.model] || { input: 1.0, output: 3.0 };
     const cost = (inputTokens * pricing.input + outputTokens * pricing.output) / 1000000;
