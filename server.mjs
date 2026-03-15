@@ -3,7 +3,7 @@ import cors from "cors";
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, readFileSync, writeFileSync } from "fs";
 import { join, dirname, extname, basename } from "path";
 import { fileURLToPath } from "url";
-import { randomUUID } from "crypto";
+import { randomUUID, createHash } from "crypto";
 import { exec } from "child_process";
 import { promisify } from "util";
 import Database from "better-sqlite3";
@@ -505,10 +505,103 @@ function parseDelegations(text) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// ── Auth Config ─────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+const APP_PASSWORD = process.env.APP_PASSWORD || "WizOz#123";
+const activeSessions = new Map();
+const SESSION_TTL = 24 * 60 * 60 * 1000;
+
+function createAuthSession() {
+  const token = randomUUID();
+  activeSessions.set(token, { created: Date.now(), expires: Date.now() + SESSION_TTL });
+  return token;
+}
+
+function isValidSession(token) {
+  const s = activeSessions.get(token);
+  if (!s) return false;
+  if (Date.now() > s.expires) { activeSessions.delete(token); return false; }
+  return true;
+}
+
+function parseCookies(cookieHeader) {
+  const cookies = {};
+  if (!cookieHeader) return cookies;
+  cookieHeader.split(";").forEach(c => {
+    const [k, ...v] = c.trim().split("=");
+    if (k) cookies[k.trim()] = v.join("=").trim();
+  });
+  return cookies;
+}
+
+const LOGIN_PAGE = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MindMappr — Login</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#0d0d0d;color:#e0e0e0;font-family:'Inter',system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}
+  .login-box{background:rgba(26,26,46,0.85);backdrop-filter:blur(20px);border:1px solid rgba(255,107,43,0.3);border-radius:16px;padding:48px 40px;width:380px;text-align:center}
+  .login-box h1{font-size:28px;font-weight:700;margin-bottom:8px;background:linear-gradient(135deg,#FF6B2B,#FFB347);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+  .login-box p{font-size:13px;color:#888;margin-bottom:32px}
+  .login-box input{width:100%;padding:14px 16px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:10px;color:#e0e0e0;font-size:15px;outline:none;margin-bottom:16px;transition:border-color .2s}
+  .login-box input:focus{border-color:#FF6B2B}
+  .login-box button{width:100%;padding:14px;background:linear-gradient(135deg,#FF6B2B,#E63946);border:none;border-radius:10px;color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:opacity .2s}
+  .login-box button:hover{opacity:0.9}
+  .error{color:#E63946;font-size:13px;margin-bottom:12px;display:none}
+</style></head><body>
+<div class="login-box">
+  <h1>MindMappr</h1>
+  <p>Command Center</p>
+  <div class="error" id="err">Incorrect password</div>
+  <form id="f" onsubmit="return doLogin(event)">
+    <input type="password" id="pw" placeholder="Enter password" autofocus />
+    <button type="submit">Enter</button>
+  </form>
+</div>
+<script>
+async function doLogin(e){
+  e.preventDefault();
+  const pw=document.getElementById('pw').value;
+  const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});
+  const d=await r.json();
+  if(d.success){window.location.href='/mindmappr';}
+  else{document.getElementById('err').style.display='block';document.getElementById('pw').value='';}
+}
+</script></body></html>`;
+
+// ══════════════════════════════════════════════════════════════════════════════
 // ── Middleware ───────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
+
+// Auth endpoints (before auth middleware)
+app.post("/api/auth/login", (req, res) => {
+  const { password } = req.body;
+  if (password === APP_PASSWORD) {
+    const token = createAuthSession();
+    res.cookie("mm_session", token, { httpOnly: true, sameSite: "lax", maxAge: SESSION_TTL, path: "/" });
+    return res.json({ success: true });
+  }
+  return res.status(401).json({ success: false, error: "Incorrect password" });
+});
+
+app.get("/api/auth/logout", (req, res) => {
+  const cookies = parseCookies(req.headers.cookie);
+  if (cookies.mm_session) activeSessions.delete(cookies.mm_session);
+  res.clearCookie("mm_session", { path: "/" });
+  res.redirect("/");
+});
+
+// Auth middleware — protect everything except login and health
+app.use((req, res, next) => {
+  if (req.path === "/api/auth/login" || req.path === "/api/health") return next();
+  const cookies = parseCookies(req.headers.cookie);
+  if (isValidSession(cookies.mm_session)) return next();
+  if (req.path.startsWith("/api/")) return res.status(401).json({ error: "Unauthorized" });
+  return res.send(LOGIN_PAGE);
+});
+
 app.use((req, _res, next) => {
   if (req.url.startsWith("/mindmappr/api/") || req.url.startsWith("/mindmappr/api?")) {
     req.url = req.url.replace("/mindmappr", "");
