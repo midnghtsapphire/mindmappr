@@ -208,8 +208,13 @@
 
     /* ── v6: Agents panel ── */
     .agents-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
-    .agent-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; transition: border-color .2s, transform .15s; }
-    .agent-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .agent-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; transition: border-color .2s, transform .15s, box-shadow .2s, background .15s; cursor: pointer; position: relative; overflow: hidden; }
+    .agent-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(233,69,96,.12); }
+    .agent-card:active { transform: translateY(0) scale(.98); transition-duration: .05s; }
+    .agent-card::after { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at var(--ripple-x, 50%) var(--ripple-y, 50%), rgba(233,69,96,.12) 0%, transparent 70%); opacity: 0; transition: opacity .3s; pointer-events: none; }
+    .agent-card:hover::after { opacity: 1; }
+    .agent-card .chat-hint { position: absolute; top: 12px; right: 12px; font-size: 11px; color: var(--text2); opacity: 0; transition: opacity .2s; display: flex; align-items: center; gap: 4px; }
+    .agent-card:hover .chat-hint { opacity: 1; }
     .agent-card-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
     .agent-icon { font-size: 28px; width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
     .agent-name { font-size: 16px; font-weight: 700; }
@@ -921,11 +926,14 @@ async function loadAgents() {
       return;
     }
     agentsCache = d.data;
+    // Dynamically sync AGENTS_META with server data (supports new agents)
+    syncAgentsMeta(d.data);
     grid.innerHTML = d.data.map(a => {
       const statusClass = a.status === 'online' ? 'online' : a.status === 'busy' ? 'busy' : 'offline';
       const statusLabel = a.status === 'online' ? 'Online' : a.status === 'busy' ? 'Busy' : 'Offline';
       const rateInfo = a.rateLimit ? `<div style="font-size:11px;color:var(--text2);margin-top:4px">${a.callsThisHour}/${a.rateLimit} calls this hour</div>` : '';
-      return `<div class="agent-card" style="border-left: 3px solid ${a.color}">
+      return `<div class="agent-card" data-agent-id="${a.id}" style="border-left: 3px solid ${a.color}" onclick="chatWithAgent('${a.id}')" onmousemove="trackRipple(event, this)">
+        <div class="chat-hint">\u{1F4AC} Click to chat</div>
         <div class="agent-card-header">
           <div class="agent-icon" style="background:${a.color}22">${a.icon}</div>
           <div>
@@ -953,13 +961,54 @@ async function loadAgents() {
           <div class="agent-last-active">Last active: ${timeAgo(a.lastActivity)}</div>
           <div style="display:flex;align-items:center;gap:10px">
             <span class="agent-status-dot ${statusClass}">${statusLabel}</span>
-            <button class="agent-invoke-btn" onclick="chatWithAgent('${a.id}')">Chat</button>
           </div>
         </div>
       </div>`;
     }).join('');
   } catch(e) {
     grid.innerHTML = '<div style="color:var(--accent)">Error loading agents: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+// Track mouse position for ripple effect on agent cards
+function trackRipple(e, card) {
+  const rect = card.getBoundingClientRect();
+  const x = ((e.clientX - rect.left) / rect.width * 100).toFixed(1);
+  const y = ((e.clientY - rect.top) / rect.height * 100).toFixed(1);
+  card.style.setProperty('--ripple-x', x + '%');
+  card.style.setProperty('--ripple-y', y + '%');
+}
+
+// Sync AGENTS_META from server data so new agents are automatically available
+function syncAgentsMeta(agentsList) {
+  agentsList.forEach(a => {
+    if (!AGENTS_META[a.id]) {
+      AGENTS_META[a.id] = { name: a.name, icon: a.icon, color: a.color };
+    } else {
+      AGENTS_META[a.id].name = a.name;
+      AGENTS_META[a.id].icon = a.icon;
+      AGENTS_META[a.id].color = a.color;
+    }
+  });
+  // Update task history filter dropdown dynamically
+  updateAgentDropdowns(agentsList);
+}
+
+// Dynamically populate agent dropdowns (task filter, schedule assignment)
+function updateAgentDropdowns(agentsList) {
+  const taskFilter = document.getElementById('taskAgentFilter');
+  if (taskFilter) {
+    const currentVal = taskFilter.value;
+    taskFilter.innerHTML = '<option value="">All Agents</option>' +
+      agentsList.map(a => `<option value="${a.id}">${escHtml(a.name)}</option>`).join('');
+    taskFilter.value = currentVal;
+  }
+  const schedAgent = document.getElementById('schedAgent');
+  if (schedAgent) {
+    const currentVal = schedAgent.value;
+    schedAgent.innerHTML = '<option value="">Auto (Rex decides)</option>' +
+      agentsList.map(a => `<option value="${a.id}">${escHtml(a.name)} — ${escHtml(a.role)}</option>`).join('');
+    schedAgent.value = currentVal;
   }
 }
 
@@ -970,9 +1019,14 @@ function chatWithAgent(agentId) {
   document.querySelector('[data-tab="chat"]').classList.add('active');
   document.getElementById('panel-chat').classList.add('active');
   const input = document.getElementById('chatInput');
-  const name = AGENTS_META[agentId]?.name || agentId;
+  const meta = AGENTS_META[agentId];
+  const name = meta?.name || agentId;
   input.value = '@' + name + ' ';
   input.focus();
+  // Place cursor at end
+  const len = input.value.length;
+  input.setSelectionRange(len, len);
+  toast(`${meta?.icon || ''} Now chatting with ${name} — type your message and hit Send`, 'success');
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1463,6 +1517,16 @@ async function init() {
     document.getElementById('statusLabel').textContent = 'Offline';
     document.getElementById('statusDot').style.background = 'var(--accent)';
   }
+
+  // Pre-load agents to sync AGENTS_META for @mention autocomplete and dropdowns
+  try {
+    const ar = await fetch(`${APIBASE}/agents`);
+    const ad = await ar.json();
+    if (ad.success && ad.data) {
+      agentsCache = ad.data;
+      syncAgentsMeta(ad.data);
+    }
+  } catch(e) { /* agents will load when tab is opened */ }
 
   await loadSessions();
 
