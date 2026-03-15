@@ -1532,6 +1532,78 @@ app.patch("/api/schedule/:id", (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
+// ── GitHub Deploy — PR listing & merging ────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN || ""; // Set GITHUB_TOKEN env var in your deployment platform
+
+async function ghFetch(url, opts = {}) {
+  const res = await fetch(url, {
+    ...opts,
+    headers: {
+      "Accept": "application/vnd.github+json",
+      "Authorization": `Bearer ${GITHUB_TOKEN}`,
+      "X-GitHub-Api-Version": "2022-11-28",
+      ...(opts.headers || {}),
+    },
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    const msg = body?.message || `GitHub API returned ${res.status}`;
+    throw new Error(msg);
+  }
+  return body;
+}
+
+// List open PRs for a repo
+app.get("/api/github/prs", async (req, res) => {
+  try {
+    const repo = req.query.repo;
+    if (!repo || !repo.includes("/")) {
+      return res.status(400).json({ success: false, error: "Missing or invalid 'repo' query param (expected OWNER/REPO)" });
+    }
+    const prs = await withRetry(
+      () => ghFetch(`https://api.github.com/repos/${repo}/pulls?state=open&sort=created&direction=desc&per_page=50`),
+      { label: "GitHub PR list" }
+    );
+    if (prs && prs.error) return res.status(502).json({ success: false, error: prs.error });
+    const data = (prs || []).map(pr => ({
+      number: pr.number,
+      title: pr.title,
+      branch: pr.head?.ref || "",
+      createdAt: pr.created_at,
+      user: pr.user?.login || "",
+      url: pr.html_url,
+      mergeable: pr.mergeable,
+    }));
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Merge a specific PR
+app.post("/api/github/merge-pr", async (req, res) => {
+  try {
+    const { repo, prNumber } = req.body;
+    if (!repo || !prNumber) {
+      return res.status(400).json({ success: false, error: "Missing 'repo' or 'prNumber' in request body" });
+    }
+    const result = await withRetry(
+      () => ghFetch(`https://api.github.com/repos/${repo}/pulls/${prNumber}/merge`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ merge_method: "merge" }),
+      }),
+      { label: "GitHub PR merge" }
+    );
+    if (result && result.error) return res.status(502).json({ success: false, error: result.error });
+    res.json({ success: true, data: result });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
 // ── Serve frontend SPA ──────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 app.get("/mindmappr", (_, res) => res.sendFile(join(__dirname, "public", "index.html")));

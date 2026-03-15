@@ -247,6 +247,28 @@
     .task-row-meta { display: flex; gap: 12px; margin-top: 6px; font-size: 11px; color: var(--text2); }
     .task-stats-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
 
+    /* ── Deploy panel ── */
+    .deploy-pr-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 10px; transition: border-color .15s; }
+    .deploy-pr-card:hover { border-color: rgba(255,107,43,0.5); }
+    .deploy-pr-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .deploy-pr-title { font-size: 14px; font-weight: 600; color: var(--text); line-height: 1.4; flex: 1; }
+    .deploy-pr-number { font-size: 12px; color: #FF6B2B; font-weight: 700; margin-right: 8px; }
+    .deploy-pr-meta { display: flex; gap: 12px; margin-top: 8px; flex-wrap: wrap; }
+    .deploy-pr-branch { font-family: monospace; font-size: 12px; color: #FFB347; background: rgba(255,179,71,0.1); padding: 2px 8px; border-radius: 4px; }
+    .deploy-pr-date { font-size: 12px; color: var(--text2); }
+    .deploy-pr-user { font-size: 12px; color: var(--text2); }
+    .btn-merge { background: linear-gradient(135deg, #FF6B2B, #E63946); color: white; border: none; border-radius: 8px; padding: 8px 18px; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity .15s, transform .1s; white-space: nowrap; flex-shrink: 0; }
+    .btn-merge:hover { opacity: .9; transform: translateY(-1px); }
+    .btn-merge:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+    .btn-merge.merged { background: linear-gradient(135deg, #10b981, #059669); }
+    .deploy-confirm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+    .deploy-confirm-box { background: var(--surface); border: 1px solid rgba(255,107,43,0.3); border-radius: 16px; padding: 32px; max-width: 440px; width: 90%; text-align: center; }
+    .deploy-confirm-title { font-size: 18px; font-weight: 700; margin-bottom: 8px; color: #FFB347; }
+    .deploy-confirm-msg { font-size: 14px; color: var(--text2); margin-bottom: 24px; line-height: 1.5; }
+    .deploy-confirm-actions { display: flex; gap: 12px; justify-content: center; }
+    .btn-cancel { background: var(--surface2); color: var(--text2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 24px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .btn-cancel:hover { border-color: var(--text2); }
+
     /* scrollbar */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -283,6 +305,7 @@
   <div class="tab" data-tab="connections">Connections</div>
   <div class="tab" data-tab="apis">APIs</div>
   <div class="tab" data-tab="analytics">Analytics</div>
+  <div class="tab" data-tab="deploy">Deploy</div>
 </div>
 
 <div class="main">
@@ -494,6 +517,48 @@
     </div>
   </div>
 
+  <!-- ── DEPLOY ── -->
+  <div class="panel" id="panel-deploy">
+    <div class="panel-inner">
+      <div class="panel-title" style="background:linear-gradient(135deg,#FF6B2B,#FFB347);-webkit-background-clip:text;-webkit-text-fill-color:transparent;display:inline-block">Deploy Center</div>
+      <div class="panel-sub">Merge GitHub Copilot PRs and trigger deploys — no terminal needed</div>
+
+      <div class="card" style="border-color:rgba(255,107,43,0.25)">
+        <div class="card-title" style="color:#FFB347">Select Repository</div>
+        <div style="margin-top:12px">
+          <select class="form-input form-select deploy-repo-select" id="deployRepoSelect" onchange="loadPRs()" style="border-color:rgba(255,107,43,0.3);max-width:420px">
+            <option value="">Choose a repository...</option>
+            <option value="midnghtsapphire/reese-reviews">midnghtsapphire/reese-reviews</option>
+            <option value="midnghtsapphire/mindmappr">midnghtsapphire/mindmappr</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="deployPrSection" style="display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin:20px 0 12px">
+          <div style="font-size:15px;font-weight:600;color:#FFB347">Open Pull Requests</div>
+          <button class="btn-sm" style="background:rgba(255,107,43,0.15);color:#FF6B2B;border:1px solid rgba(255,107,43,0.3);padding:6px 14px;font-weight:600" onclick="loadPRs()">Refresh</button>
+        </div>
+        <div id="deployPrList"></div>
+      </div>
+
+      <div id="deployLoading" style="display:none;text-align:center;padding:40px 0">
+        <div class="typing" style="justify-content:center">
+          <span style="background:#FF6B2B"></span>
+          <span style="background:#FFB347"></span>
+          <span style="background:#E63946"></span>
+        </div>
+        <div style="font-size:13px;color:var(--text2);margin-top:8px">Loading pull requests...</div>
+      </div>
+
+      <div id="deployEmpty" style="display:none" class="empty-state">
+        <div class="empty-icon" style="color:#FFB347">&#x2714;&#xFE0F;</div>
+        <div style="font-size:15px;font-weight:600;margin-bottom:4px">All clear!</div>
+        <div>No open pull requests for this repo</div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <div id="toast"></div>
@@ -538,6 +603,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (tab.dataset.tab === 'schedules') loadSchedules();
     if (tab.dataset.tab === 'agents') loadAgents();
     if (tab.dataset.tab === 'history') { loadTaskHistory(); loadTaskStats(); }
+    if (tab.dataset.tab === 'deploy') loadPRs();
   });
 });
 
@@ -1254,7 +1320,137 @@ function timeAgo(iso) {
   return Math.floor(h/24) + 'd ago';
 }
 
-// ── Init ───────────────────────────────────────────────────────────────────
+// ── Deploy ─────────────────────────────────────────────────────────────────────
+let deployMerging = {};
+
+async function loadPRs() {
+  const repo = document.getElementById('deployRepoSelect').value;
+  const prSection = document.getElementById('deployPrSection');
+  const prList = document.getElementById('deployPrList');
+  const loading = document.getElementById('deployLoading');
+  const empty = document.getElementById('deployEmpty');
+
+  prSection.style.display = 'none';
+  empty.style.display = 'none';
+
+  if (!repo) { return; }
+
+  loading.style.display = 'block';
+
+  try {
+    const r = await fetch(`${APIBASE}/github/prs?repo=${encodeURIComponent(repo)}`);
+    const d = await r.json();
+    loading.style.display = 'none';
+
+    if (!d.success) {
+      toast(d.error || 'Failed to load PRs', 'error');
+      return;
+    }
+
+    if (!d.data || d.data.length === 0) {
+      empty.style.display = 'block';
+      return;
+    }
+
+    prSection.style.display = 'block';
+    prList.innerHTML = d.data.map(pr => {
+      const date = new Date(pr.createdAt);
+      const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      const timeStr = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      return `
+        <div class="deploy-pr-card" id="pr-card-${pr.number}">
+          <div class="deploy-pr-header">
+            <div style="flex:1">
+              <div class="deploy-pr-title">
+                <span class="deploy-pr-number">#${pr.number}</span>${escHtml(pr.title)}
+              </div>
+              <div class="deploy-pr-meta">
+                <span class="deploy-pr-branch">${escHtml(pr.branch)}</span>
+                <span class="deploy-pr-date">${dateStr} at ${timeStr}</span>
+                ${pr.user ? `<span class="deploy-pr-user">by ${escHtml(pr.user)}</span>` : ''}
+              </div>
+            </div>
+            <button class="btn-merge" id="merge-btn-${pr.number}" onclick="confirmMergePR('${repo}', ${pr.number}, this)">
+              Merge
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    loading.style.display = 'none';
+    toast('Failed to fetch PRs: ' + e.message, 'error');
+  }
+}
+
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function confirmMergePR(repo, prNumber, btn) {
+  if (deployMerging[prNumber]) return;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'deploy-confirm-overlay';
+  overlay.innerHTML = `
+    <div class="deploy-confirm-box">
+      <div class="deploy-confirm-title">Merge PR #${prNumber}?</div>
+      <div class="deploy-confirm-msg">
+        This will merge the pull request into the main branch of <strong>${escHtml(repo)}</strong>.
+        If autodeploy is enabled, this will trigger a new deployment.
+      </div>
+      <div class="deploy-confirm-actions">
+        <button class="btn-cancel" onclick="this.closest('.deploy-confirm-overlay').remove()">Cancel</button>
+        <button class="btn-merge" onclick="this.closest('.deploy-confirm-overlay').remove(); doMergePR('${repo}', ${prNumber})">Yes, Merge</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+}
+
+async function doMergePR(repo, prNumber) {
+  const btn = document.getElementById(`merge-btn-${prNumber}`);
+  if (!btn || deployMerging[prNumber]) return;
+
+  deployMerging[prNumber] = true;
+  btn.disabled = true;
+  btn.textContent = 'Merging...';
+
+  try {
+    const r = await fetch(`${APIBASE}/github/merge-pr`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo, prNumber }),
+    });
+    const d = await r.json();
+
+    if (d.success) {
+      btn.textContent = 'Merged!';
+      btn.classList.add('merged');
+      toast(`PR #${prNumber} merged successfully! Deploy triggered.`, 'success');
+      const card = document.getElementById(`pr-card-${prNumber}`);
+      if (card) {
+        card.style.borderColor = '#10b981';
+        card.style.opacity = '0.7';
+      }
+    } else {
+      btn.textContent = 'Merge';
+      btn.disabled = false;
+      deployMerging[prNumber] = false;
+      toast(d.error || 'Merge failed', 'error');
+    }
+  } catch (e) {
+    btn.textContent = 'Merge';
+    btn.disabled = false;
+    deployMerging[prNumber] = false;
+    toast('Merge failed: ' + e.message, 'error');
+  }
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────────
 async function init() {
   try {
     const r = await fetch(`${APIBASE}/health`);
