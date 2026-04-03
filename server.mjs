@@ -127,6 +127,18 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now')),
     completed_at TEXT
   );
+  CREATE TABLE IF NOT EXISTS custom_agents (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    model TEXT NOT NULL DEFAULT 'anthropic/claude-sonnet-4',
+    role TEXT NOT NULL,
+    description TEXT NOT NULL,
+    icon TEXT NOT NULL DEFAULT '🤖',
+    color TEXT NOT NULL DEFAULT '#6c5ce7',
+    system_prompt TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
 `);
 
 // Seed known facts about the owner
@@ -346,7 +358,8 @@ function getGeneratorCallsThisHour() {
 // ── Agent LLM call (routes through OpenRouter using LLM_API_KEY) ────────────
 // ══════════════════════════════════════════════════════════════════════════════
 async function callAgentLLM(agentName, messages, maxTokens = 2048) {
-  const agent = AGENT_DEFINITIONS[agentName];
+  const allDefs = getAllAgentDefinitions();
+  const agent = allDefs[agentName];
   if (!agent) throw new Error(`Unknown agent: ${agentName}`);
 
   const model = agent.model;
@@ -389,7 +402,8 @@ async function callAgentLLM(agentName, messages, maxTokens = 2048) {
  * Invoke an agent with a user message, log to task history
  */
 async function invokeAgent(agentName, userMessage, sessionId = null) {
-  const agent = AGENT_DEFINITIONS[agentName];
+  const allDefs = getAllAgentDefinitions();
+  const agent = allDefs[agentName];
   if (!agent) throw new Error(`Unknown agent: ${agentName}`);
 
   // Rate limit check for Generator
@@ -479,7 +493,8 @@ function parseAgentMention(message) {
   const match = message.match(mentionPattern);
   if (match) {
     const mentioned = match[1].toLowerCase();
-    if (AGENT_DEFINITIONS[mentioned]) {
+    const allDefs = getAllAgentDefinitions();
+    if (allDefs[mentioned]) {
       return { agentName: mentioned, cleanMessage: message.slice(match[0].length).trim() };
     }
   }
@@ -496,12 +511,40 @@ function parseDelegations(text) {
     const match = line.match(/DELEGATE:(\w+):(.+)/i);
     if (match) {
       const agent = match[1].trim().toLowerCase();
-      if (AGENT_DEFINITIONS[agent]) {
+      const allDefs = getAllAgentDefinitions();
+      if (allDefs[agent]) {
         results.push({ agent, task: match[2].trim() });
       }
     }
   }
   return results;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── v6: Merge built-in + custom agent definitions ──────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+function getAllAgentDefinitions() {
+  const all = { ...AGENT_DEFINITIONS };
+  try {
+    const customs = db.prepare("SELECT * FROM custom_agents").all();
+    for (const c of customs) {
+      all[c.id] = {
+        name: c.name,
+        model: c.model,
+        role: c.role,
+        description: c.description,
+        icon: c.icon,
+        color: c.color,
+        systemPrompt: c.system_prompt,
+        isCustom: true,
+      };
+      // Init agentState for custom agents if not present
+      if (!agentState[c.id]) {
+        agentState[c.id] = { status: "online", lastActivity: new Date().toISOString(), taskCount: 0, totalCost: 0 };
+      }
+    }
+  } catch (e) { console.error("[Custom Agents] Load error:", e.message); }
+  return all;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -904,7 +947,7 @@ app.get("/api/health", (_, res) => res.json({
   service: "MindMappr Agent v6 — Command Center",
   version: "6.0.0",
   features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history"],
-  agents: Object.keys(AGENT_DEFINITIONS),
+  agents: Object.keys(getAllAgentDefinitions()),
   ts: new Date().toISOString(),
   tools: ["elevenlabs_tts", "generate_image", "create_video", "create_pdf", "run_python", "web_scrape", "create_csv", "create_html", "send_slack"]
 }));
@@ -916,8 +959,9 @@ app.get("/api/health", (_, res) => res.json({
 // List all agents with status
 app.get("/api/agents", (_, res) => {
   try {
-    const agents = Object.entries(AGENT_DEFINITIONS).map(([key, def]) => {
-      const state = agentState[key];
+    const allDefs = getAllAgentDefinitions();
+    const agents = Object.entries(allDefs).map(([key, def]) => {
+      const state = agentState[key] || { status: "online", lastActivity: new Date().toISOString(), taskCount: 0, totalCost: 0 };
       const recentTasks = db.prepare(
         "SELECT COUNT(*) as count FROM agent_tasks WHERE agent_name = ? AND created_at > datetime('now', '-24 hours')"
       ).get(key);
@@ -932,8 +976,9 @@ app.get("/api/agents", (_, res) => {
         status: state.status,
         lastActivity: state.lastActivity,
         taskCount: state.taskCount,
-        tasksLast24h: recentTasks.count,
+        tasksLast24h: recentTasks?.count || 0,
         totalCost: Math.round(state.totalCost * 100000) / 100000,
+        isCustom: !!def.isCustom,
         ...(key === "generator" ? { callsThisHour: getGeneratorCallsThisHour(), rateLimit: GENERATOR_RATE_LIMIT } : {}),
       };
     });
@@ -943,13 +988,68 @@ app.get("/api/agents", (_, res) => {
   }
 });
 
-// Invoke a specific agent directly
+// Create a new custom agent
+app.post("/api/agents", (req, res) => {
+  try {
+    const { id: rawId, name, model, role, description, icon, color, systemPrompt } = req.body;
+    if (!name || !role || !systemPrompt) return res.status(400).json({ success: false, error: "name, role, and systemPrompt are required" });
+    const id = (rawId || name).toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+    if (AGENT_DEFINITIONS[id]) return res.status(409).json({ success: false, error: "Cannot override built-in agent" });
+    const existing = db.prepare("SELECT id FROM custom_agents WHERE id = ?").get(id);
+    if (existing) return res.status(409).json({ success: false, error: `Agent '${id}' already exists` });
+    db.prepare(
+      "INSERT INTO custom_agents (id, name, model, role, description, icon, color, system_prompt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(id, name, model || 'anthropic/claude-sonnet-4', role, description || role, icon || '\u{1F916}', color || '#6c5ce7', systemPrompt);
+    agentState[id] = { status: "online", lastActivity: new Date().toISOString(), taskCount: 0, totalCost: 0 };
+    res.json({ success: true, data: { id, name, model: model || 'anthropic/claude-sonnet-4', role, description: description || role, icon: icon || '\u{1F916}', color: color || '#6c5ce7' } });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Update a custom agent
+app.put("/api/agents/:id", (req, res) => {
+  try {
+    const agentId = req.params.id;
+    if (AGENT_DEFINITIONS[agentId]) return res.status(403).json({ success: false, error: "Cannot modify built-in agents" });
+    const existing = db.prepare("SELECT * FROM custom_agents WHERE id = ?").get(agentId);
+    if (!existing) return res.status(404).json({ success: false, error: "Agent not found" });
+    const { name, model, role, description, icon, color, systemPrompt } = req.body;
+    db.prepare(
+      "UPDATE custom_agents SET name=?, model=?, role=?, description=?, icon=?, color=?, system_prompt=?, updated_at=datetime('now') WHERE id=?"
+    ).run(
+      name || existing.name, model || existing.model, role || existing.role,
+      description || existing.description, icon || existing.icon, color || existing.color,
+      systemPrompt || existing.system_prompt, agentId
+    );
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Delete a custom agent
+app.delete("/api/agents/:id", (req, res) => {
+  try {
+    const agentId = req.params.id;
+    if (AGENT_DEFINITIONS[agentId]) return res.status(403).json({ success: false, error: "Cannot delete built-in agents" });
+    const result = db.prepare("DELETE FROM custom_agents WHERE id = ?").run(agentId);
+    if (result.changes === 0) return res.status(404).json({ success: false, error: "Agent not found" });
+    delete agentState[agentId];
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Invoke a specific agent directly (built-in OR custom)
 app.post("/api/agents/:name/invoke", async (req, res) => {
   try {
     const agentName = req.params.name.toLowerCase();
     const { message, sessionId } = req.body;
     if (!message) return res.status(400).json({ success: false, error: "message required" });
-    if (!AGENT_DEFINITIONS[agentName]) return res.status(404).json({ success: false, error: `Unknown agent: ${agentName}` });
+    const allDefs = getAllAgentDefinitions();
+    if (!allDefs[agentName]) return res.status(404).json({ success: false, error: `Unknown agent: ${agentName}` });
 
     const result = await invokeAgent(agentName, message, sessionId);
     res.json({ success: true, data: result });
@@ -1030,10 +1130,11 @@ app.post("/api/chat", async (req, res) => {
 
     if (agentName) {
       // Direct agent invocation via @mention
+      const allDefs = getAllAgentDefinitions();
       try {
         const agentResult = await invokeAgent(agentName, cleanMessage, sid);
         reply = agentResult.text;
-        respondingAgent = { name: AGENT_DEFINITIONS[agentName].name, icon: AGENT_DEFINITIONS[agentName].icon, id: agentName };
+        respondingAgent = { name: allDefs[agentName].name, icon: allDefs[agentName].icon, id: agentName };
 
         // Check if Rex delegated to other agents
         if (agentName === "rex") {
@@ -1043,9 +1144,9 @@ app.post("/api/chat", async (req, res) => {
             for (const d of delegations) {
               try {
                 const dResult = await invokeAgent(d.agent, d.task, sid);
-                delegationResults.push(`**${AGENT_DEFINITIONS[d.agent].name}** ${AGENT_DEFINITIONS[d.agent].icon}: ${dResult.text}`);
+                delegationResults.push(`**${allDefs[d.agent].name}** ${allDefs[d.agent].icon}: ${dResult.text}`);
               } catch (err) {
-                delegationResults.push(`**${AGENT_DEFINITIONS[d.agent].name}**: Error — ${err.message}`);
+                delegationResults.push(`**${allDefs[d.agent].name}**: Error — ${err.message}`);
               }
             }
             // Clean delegation markers from Rex's reply
@@ -1056,8 +1157,8 @@ app.post("/api/chat", async (req, res) => {
           }
         }
       } catch (err) {
-        reply = `${AGENT_DEFINITIONS[agentName].name} ran into an issue: ${friendlyError(err, AGENT_DEFINITIONS[agentName].name)}`;
-        respondingAgent = { name: AGENT_DEFINITIONS[agentName].name, icon: AGENT_DEFINITIONS[agentName].icon, id: agentName };
+        reply = `${allDefs[agentName].name} ran into an issue: ${friendlyError(err, allDefs[agentName].name)}`;
+        respondingAgent = { name: allDefs[agentName].name, icon: allDefs[agentName].icon, id: agentName };
       }
     } else {
       // No agent mentioned — use existing MindMappr flow (tool execution)
@@ -1066,6 +1167,7 @@ app.post("/api/chat", async (req, res) => {
 
       if (isAgentQuestion) {
         // Route through Rex
+        const allDefs = getAllAgentDefinitions();
         try {
           const rexResult = await invokeAgent("rex", userContent, sid);
           reply = rexResult.text;
@@ -1078,9 +1180,9 @@ app.post("/api/chat", async (req, res) => {
             for (const d of delegations) {
               try {
                 const dResult = await invokeAgent(d.agent, d.task, sid);
-                delegationResults.push(`**${AGENT_DEFINITIONS[d.agent].name}** ${AGENT_DEFINITIONS[d.agent].icon}: ${dResult.text}`);
+                delegationResults.push(`**${allDefs[d.agent].name}** ${allDefs[d.agent].icon}: ${dResult.text}`);
               } catch (err) {
-                delegationResults.push(`**${AGENT_DEFINITIONS[d.agent].name}**: Error — ${err.message}`);
+                delegationResults.push(`**${allDefs[d.agent].name}**: Error — ${err.message}`);
               }
             }
             reply = reply.replace(/DELEGATE:\w+:.+/gi, "").trim();
@@ -1451,7 +1553,8 @@ function startCronJob(task) {
       const config = JSON.parse(task.task_config);
 
       // v6: If task has an assigned agent, route to that agent
-      if (task.assigned_agent && AGENT_DEFINITIONS[task.assigned_agent]) {
+      const allDefs = getAllAgentDefinitions();
+      if (task.assigned_agent && allDefs[task.assigned_agent]) {
         const agentMessage = config.message || `Execute scheduled task: ${task.name}`;
         await invokeAgent(task.assigned_agent, agentMessage);
       } else if (task.task_type === "tool") {
@@ -1489,7 +1592,8 @@ app.post("/api/schedule", (req, res) => {
       return res.status(400).json({ success: false, error: "Invalid cron expression. Use format like '0 9 * * *' (every day at 9am)." });
     }
     const configStr = typeof task_config === "string" ? task_config : JSON.stringify(task_config);
-    const agentStr = assigned_agent && AGENT_DEFINITIONS[assigned_agent] ? assigned_agent : null;
+    const allDefs = getAllAgentDefinitions();
+    const agentStr = assigned_agent && allDefs[assigned_agent] ? assigned_agent : null;
     const result = db.prepare("INSERT INTO scheduled_tasks (name, cron_expression, task_type, task_config, assigned_agent) VALUES (?, ?, ?, ?, ?)").run(name, cron_expression, task_type, configStr, agentStr);
     const task = db.prepare("SELECT * FROM scheduled_tasks WHERE id = ?").get(result.lastInsertRowid);
     startCronJob(task);
@@ -1619,6 +1723,6 @@ app.get("/mindmappr/*", (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 app.listen(PORT, () => {
   console.log(`MindMappr Agent v6 — Command Center running on port ${PORT}`);
-  console.log(`Agents online: ${Object.values(AGENT_DEFINITIONS).map(a => a.name).join(", ")}`);
+  console.log(`Agents online: ${Object.values(getAllAgentDefinitions()).map(a => a.name).join(", ")}`);
   loadAndStartSchedules();
 });

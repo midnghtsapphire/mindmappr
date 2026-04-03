@@ -233,6 +233,19 @@
     .agent-status-dot.offline::before { background: var(--text2); }
     .agent-invoke-btn { background: none; border: 1px solid var(--border); color: var(--text2); border-radius: 6px; padding: 5px 12px; font-size: 12px; cursor: pointer; font-weight: 500; transition: all .15s; }
     .agent-invoke-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .agent-actions-bar { display: flex; gap: 6px; margin-top: 10px; }
+    .agent-actions-bar .btn-sm { padding: 5px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 500; border: 1px solid var(--border); background: var(--surface2); color: var(--text2); transition: all .15s; }
+    .agent-actions-bar .btn-sm:hover { border-color: var(--accent); color: var(--accent); }
+    .agent-actions-bar .btn-sm.btn-del { color: var(--accent); }
+    .agent-actions-bar .btn-sm.btn-del:hover { background: rgba(233,69,96,.15); }
+    .create-agent-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+    .create-agent-box { background: var(--surface); border: 1px solid rgba(233,69,96,.3); border-radius: 16px; padding: 32px; max-width: 520px; width: 90%; max-height: 85vh; overflow-y: auto; }
+    .create-agent-box h3 { font-size: 18px; font-weight: 700; margin-bottom: 4px; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .create-agent-box .modal-sub { font-size: 13px; color: var(--text2); margin-bottom: 20px; }
+    .create-agent-box textarea.form-input { min-height: 80px; resize: vertical; }
+    .create-agent-actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px; }
+    .btn-create-agent { display: flex; align-items: center; gap: 6px; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: white; border: none; border-radius: 8px; padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer; transition: opacity .15s; margin-bottom: 16px; }
+    .btn-create-agent:hover { opacity: .9; }
 
     /* ── v6: Task History panel ── */
     .task-history-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
@@ -355,7 +368,8 @@
   <div class="panel" id="panel-agents">
     <div class="panel-inner">
       <div class="panel-title">Agent Command Center</div>
-      <div class="panel-sub">5 specialized AI agents — click any agent to chat with them directly</div>
+      <div class="panel-sub">Specialized AI agents — click any agent to chat, or create your own custom agents</div>
+      <button class="btn-create-agent" onclick="openCreateAgentModal()">➕ Create Agent</button>
       <div id="agentsGrid" class="agents-grid">
         <div style="color:var(--text2);font-size:13px">Loading agents…</div>
       </div>
@@ -968,6 +982,10 @@ async function loadAgents() {
             <span class="agent-status-dot ${statusClass}">${statusLabel}</span>
           </div>
         </div>
+        ${a.isCustom ? `<div class="agent-actions-bar">
+          <button class="btn-sm" onclick="event.stopPropagation();editAgent('${a.id}')">Edit</button>
+          <button class="btn-sm btn-del" onclick="event.stopPropagation();deleteAgent('${a.id}','${escHtml(a.name)}')">Delete</button>
+        </div>` : ''}
       </div>`;
     }).join('');
   } catch(e) {
@@ -1032,6 +1050,148 @@ function chatWithAgent(agentId) {
   const len = input.value.length;
   input.setSelectionRange(len, len);
   toast(`${meta?.icon || ''} Now chatting with ${name} — type your message and hit Send`, 'success');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── v6: Create / Edit / Delete custom agents ────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+function openCreateAgentModal(editData = null) {
+  const isEdit = !!editData;
+  const title = isEdit ? 'Edit Agent' : 'Create Agent';
+  const sub = isEdit ? 'Update your custom agent settings' : 'Build a new custom AI agent with its own personality and purpose';
+  const btnLabel = isEdit ? 'Save Changes' : 'Create Agent';
+  const modal = document.createElement('div');
+  modal.className = 'create-agent-modal';
+  modal.id = 'createAgentModal';
+  modal.innerHTML = `
+    <div class="create-agent-box">
+      <h3>${title}</h3>
+      <div class="modal-sub">${sub}</div>
+      <div class="form-group">
+        <label class="form-label">Agent ID (lowercase, no spaces)</label>
+        <input class="form-input" id="agentFormId" placeholder="e.g. researcher" ${isEdit ? 'disabled' : ''} value="${isEdit ? escHtml(editData.id) : ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Display Name</label>
+        <input class="form-input" id="agentFormName" placeholder="e.g. Researcher" value="${isEdit ? escHtml(editData.name) : ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Icon (emoji)</label>
+        <input class="form-input" id="agentFormIcon" placeholder="e.g. \uD83D\uDD2C" value="${isEdit ? editData.icon : ''}" style="width:80px">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Description</label>
+        <input class="form-input" id="agentFormDesc" placeholder="What does this agent do?" value="${isEdit ? escHtml(editData.description || editData.role || '') : ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">System Prompt</label>
+        <textarea class="form-input" id="agentFormPrompt" rows="4" placeholder="You are a specialized agent that...">${isEdit ? escHtml(editData.systemPrompt || '') : ''}</textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Model</label>
+        <select class="form-input form-select" id="agentFormModel">
+          <option value="anthropic/claude-sonnet-4">Claude Sonnet 4</option>
+          <option value="anthropic/claude-3.5-haiku">Claude 3.5 Haiku</option>
+          <option value="mistralai/mistral-small">Mistral Small</option>
+          <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
+          <option value="openai/gpt-4.1-mini">GPT-4.1 Mini</option>
+        </select>
+      </div>
+      <div class="create-agent-actions">
+        <button class="btn-cancel" onclick="closeCreateAgentModal()">Cancel</button>
+        <button class="btn-primary" onclick="${isEdit ? `submitEditAgent('${editData.id}')` : 'submitCreateAgent()'}">${btnLabel}</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeCreateAgentModal(); });
+  if (isEdit && editData.model) {
+    document.getElementById('agentFormModel').value = editData.model;
+  }
+}
+
+function closeCreateAgentModal() {
+  const m = document.getElementById('createAgentModal');
+  if (m) m.remove();
+}
+
+async function submitCreateAgent() {
+  const id = document.getElementById('agentFormId').value.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+  const name = document.getElementById('agentFormName').value.trim();
+  const icon = document.getElementById('agentFormIcon').value.trim() || '\uD83E\uDD16';
+  const description = document.getElementById('agentFormDesc').value.trim();
+  const systemPrompt = document.getElementById('agentFormPrompt').value.trim();
+  const model = document.getElementById('agentFormModel').value;
+  if (!name) { toast('Display Name is required', 'error'); return; }
+  if (!systemPrompt) { toast('System Prompt is required', 'error'); return; }
+  try {
+    const r = await fetch(`${APIBASE}/agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id || undefined, name, model, role: description || name, description, icon, systemPrompt })
+    });
+    const d = await r.json();
+    if (!d.success) { toast(d.error || 'Failed to create agent', 'error'); return; }
+    toast(`${icon} Agent "${name}" created!`, 'success');
+    closeCreateAgentModal();
+    loadAgents();
+  } catch(e) {
+    toast('Error creating agent: ' + e.message, 'error');
+  }
+}
+
+async function editAgent(agentId) {
+  // Fetch current agent data from cache or server
+  let agentData = agentsCache.find(a => a.id === agentId);
+  if (!agentData) {
+    toast('Agent not found', 'error');
+    return;
+  }
+  // Fetch full agent data including systemPrompt from server
+  try {
+    const r = await fetch(`${APIBASE}/agents`);
+    const d = await r.json();
+    if (d.success) {
+      const full = d.data.find(a => a.id === agentId);
+      if (full) agentData = full;
+    }
+  } catch(e) {}
+  openCreateAgentModal(agentData);
+}
+
+async function submitEditAgent(agentId) {
+  const name = document.getElementById('agentFormName').value.trim();
+  const icon = document.getElementById('agentFormIcon').value.trim();
+  const description = document.getElementById('agentFormDesc').value.trim();
+  const systemPrompt = document.getElementById('agentFormPrompt').value.trim();
+  const model = document.getElementById('agentFormModel').value;
+  try {
+    const r = await fetch(`${APIBASE}/agents/${agentId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, model, role: description, description, icon, systemPrompt })
+    });
+    const d = await r.json();
+    if (!d.success) { toast(d.error || 'Failed to update agent', 'error'); return; }
+    toast(`Agent "${name}" updated!`, 'success');
+    closeCreateAgentModal();
+    loadAgents();
+  } catch(e) {
+    toast('Error updating agent: ' + e.message, 'error');
+  }
+}
+
+async function deleteAgent(agentId, agentName) {
+  if (!confirm(`Delete custom agent "${agentName}"? This cannot be undone.`)) return;
+  try {
+    const r = await fetch(`${APIBASE}/agents/${agentId}`, { method: 'DELETE' });
+    const d = await r.json();
+    if (!d.success) { toast(d.error || 'Failed to delete agent', 'error'); return; }
+    toast(`Agent "${agentName}" deleted`, 'success');
+    loadAgents();
+  } catch(e) {
+    toast('Error deleting agent: ' + e.message, 'error');
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
