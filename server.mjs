@@ -141,6 +141,54 @@ db.exec(`
   );
 `);
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Content Studio DB Tables (CreatorBuddy-style) ──────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+db.exec(`
+  CREATE TABLE IF NOT EXISTS content_studio_posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT,
+    content TEXT NOT NULL,
+    platform TEXT DEFAULT 'general',
+    content_type TEXT DEFAULT 'post',
+    score INTEGER DEFAULT 0,
+    score_details TEXT,
+    status TEXT DEFAULT 'draft',
+    tags TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    published_at TEXT
+  );
+  CREATE TABLE IF NOT EXISTS content_studio_inspirations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_url TEXT,
+    source_author TEXT,
+    original_content TEXT NOT NULL,
+    repurposed_content TEXT,
+    platform TEXT DEFAULT 'general',
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS content_studio_braindumps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    raw_thoughts TEXT NOT NULL,
+    generated_posts TEXT,
+    generated_article TEXT,
+    generated_script TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS content_studio_analytics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    post_id INTEGER,
+    platform TEXT,
+    impressions INTEGER DEFAULT 0,
+    engagements INTEGER DEFAULT 0,
+    clicks INTEGER DEFAULT 0,
+    shares INTEGER DEFAULT 0,
+    recorded_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (post_id) REFERENCES content_studio_posts(id)
+  );
+`);
+
 // Seed known facts about the owner
 const existingFacts = db.prepare("SELECT COUNT(*) as c FROM facts WHERE category = 'owner'").get();
 if (existingFacts.c === 0) {
@@ -221,6 +269,7 @@ You are loaded with a massive 300+ skill library across 11 domains:
 9. Content & Documentation (Tech Docs, README, Onboarding, Runbooks)
 10. Security (Audit, OWASP, Pen-Test, Secrets, Rate Limiting)
 11. AI & Automation (Prompt Eng, Agent Workflows, RAG, Classification)
+12. Content Studio (AI Content Composer, Algorithm Scorer, Brain Dump, Content Repurposer, Content Coach, Account Researcher)
 
 Always invoke these skills when users ask for help. Match user intent to the skill registry.
 
@@ -229,6 +278,8 @@ AVAILABLE AGENTS YOU CAN DELEGATE TO:
 - Scheduler: Cron tasks, scheduling, morning briefs
 - Processor: Fast data processing, email parsing, structured extraction
 - Generator: Content creation, blog posts, reports, documentation
+
+When users ask about content creation, social media strategy, or marketing content, mention the Content Studio tab and its tools.
 
 DELEGATION FORMAT (include in your response when delegating):
 DELEGATE:watcher:Check system health status
@@ -953,13 +1004,514 @@ async function executeTaskPlan(plan, progressCallback) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// ── Content Studio — CreatorBuddy-style AI Content Creation Suite ─────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Content Studio: AI Content Composer ─────────────────────────────────────
+app.post("/api/content-studio/compose", async (req, res) => {
+  try {
+    const { topic, platform, contentType, tone, audience, keywords } = req.body;
+    if (!topic) return res.status(400).json({ success: false, error: "topic is required" });
+
+    const platformGuide = {
+      twitter: "Keep under 280 characters. Use hooks, threads if needed. Hashtags sparingly (1-2 max). Punchy, conversational.",
+      linkedin: "Professional but personable. 1300 char sweet spot. Use line breaks for readability. Include a call-to-action. Story-driven.",
+      instagram: "Visual-first caption. Use emojis strategically. 5-10 relevant hashtags at end. Conversational, authentic tone.",
+      facebook: "Conversational, shareable. 40-80 chars for max engagement. Questions drive comments. Link posts get less reach.",
+      blog: "Long-form, SEO-optimized. Use H2/H3 headers. Include meta description. 1500-2500 words ideal. Internal/external links.",
+      youtube_script: "Hook in first 5 seconds. Pattern interrupts every 30-60 seconds. Call to action. Conversational, energetic.",
+      tiktok: "Ultra-short hook (1-2 sec). Trend-aware. Casual, authentic. 15-60 second scripts. Strong CTA.",
+      email: "Subject line is everything. Personal, value-driven. Single CTA. Mobile-optimized length.",
+      general: "Versatile content that can be adapted across platforms."
+    };
+
+    const typeGuide = {
+      post: "Single social media post",
+      thread: "Multi-part thread (5-10 parts, each building on the last)",
+      article: "Long-form article with sections, headers, and depth",
+      video_script: "Video script with visual cues, timing notes, and dialogue",
+      carousel: "Slide-by-slide carousel content (8-10 slides)",
+      newsletter: "Email newsletter with sections, links, and personal touch",
+      ad_copy: "Advertising copy with headline, body, and CTA variants"
+    };
+
+    const systemPrompt = `You are an expert content creator and social media strategist. You create high-performing content that drives engagement and growth.
+
+PLATFORM: ${platform || 'general'}
+PLATFORM GUIDELINES: ${platformGuide[platform] || platformGuide.general}
+CONTENT TYPE: ${contentType || 'post'}
+TYPE DETAILS: ${typeGuide[contentType] || typeGuide.post}
+TONE: ${tone || 'professional yet approachable'}
+TARGET AUDIENCE: ${audience || 'general professional audience'}
+${keywords ? `KEYWORDS TO INCLUDE: ${keywords}` : ''}
+
+RULES:
+1. Create READY-TO-POST content — no placeholders, no "[insert X]"
+2. Match the platform's native style and best practices
+3. Include engagement hooks (questions, bold statements, stories)
+4. Optimize for the platform's algorithm (see guidelines above)
+5. If creating a thread, number each part and make each one standalone-valuable
+6. For video scripts, include [VISUAL] cues and timing
+7. End with a clear call-to-action appropriate for the platform
+8. Write in a human, authentic voice — never robotic or generic`;
+
+    const messages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: `Create ${contentType || 'a post'} about: ${topic}` }
+    ];
+
+    const result = await callLLM(messages);
+    if (result && typeof result === "object" && result.success === false) {
+      return res.status(500).json({ success: false, error: result.error });
+    }
+
+    // Save to DB
+    const ins = db.prepare(
+      "INSERT INTO content_studio_posts (title, content, platform, content_type, tags, status) VALUES (?, ?, ?, ?, ?, 'draft')"
+    ).run(topic, result, platform || 'general', contentType || 'post', keywords || '');
+
+    res.json({
+      success: true,
+      data: {
+        id: ins.lastInsertRowid,
+        content: result,
+        platform: platform || 'general',
+        contentType: contentType || 'post',
+        topic
+      }
+    });
+  } catch (e) {
+    console.error("[Content Studio] Compose error:", e.message);
+    res.status(500).json({ success: false, error: friendlyError(e, "Content Composer") });
+  }
+});
+
+// ── Content Studio: AI Algorithm Scorer ─────────────────────────────────────
+app.post("/api/content-studio/score", async (req, res) => {
+  try {
+    const { content, platform } = req.body;
+    if (!content) return res.status(400).json({ success: false, error: "content is required" });
+
+    const systemPrompt = `You are an expert social media algorithm analyst. You understand how content ranking algorithms work across all major platforms.
+
+Analyze the given content and score it on these 9 metrics that algorithms prioritize. Return ONLY valid JSON (no markdown, no code fences).
+
+PLATFORM: ${platform || 'general'}
+
+Score each metric 1-10 and provide a brief explanation:
+
+{
+  "overall_score": <1-10>,
+  "metrics": {
+    "hook_strength": { "score": <1-10>, "feedback": "<why>" },
+    "engagement_potential": { "score": <1-10>, "feedback": "<why>" },
+    "emotional_resonance": { "score": <1-10>, "feedback": "<why>" },
+    "clarity": { "score": <1-10>, "feedback": "<why>" },
+    "value_density": { "score": <1-10>, "feedback": "<why>" },
+    "shareability": { "score": <1-10>, "feedback": "<why>" },
+    "format_optimization": { "score": <1-10>, "feedback": "<why>" },
+    "cta_effectiveness": { "score": <1-10>, "feedback": "<why>" },
+    "authenticity": { "score": <1-10>, "feedback": "<why>" }
+  },
+  "top_strengths": ["<strength1>", "<strength2>"],
+  "improvements": ["<improvement1>", "<improvement2>", "<improvement3>"],
+  "predicted_performance": "<low|medium|high|viral>",
+  "improved_version": "<rewritten version that would score higher>"
+}`;
+
+    const messages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: `Score this content:\n\n${content}` }
+    ];
+
+    const result = await callLLM(messages);
+    if (result && typeof result === "object" && result.success === false) {
+      return res.status(500).json({ success: false, error: result.error });
+    }
+
+    let parsed;
+    try {
+      // Strip markdown code fences if present
+      const cleaned = result.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      parsed = JSON.parse(cleaned);
+    } catch {
+      parsed = { overall_score: 0, raw_response: result, parse_error: true };
+    }
+
+    res.json({ success: true, data: parsed });
+  } catch (e) {
+    console.error("[Content Studio] Score error:", e.message);
+    res.status(500).json({ success: false, error: friendlyError(e, "Content Scorer") });
+  }
+});
+
+// ── Content Studio: AI Brain Dump ───────────────────────────────────────────
+app.post("/api/content-studio/braindump", async (req, res) => {
+  try {
+    const { thoughts, platforms } = req.body;
+    if (!thoughts) return res.status(400).json({ success: false, error: "thoughts are required" });
+
+    const targetPlatforms = platforms || ['twitter', 'linkedin', 'blog'];
+
+    const systemPrompt = `You are an expert content strategist who transforms raw, unstructured thoughts into polished, platform-ready content.
+
+The user will give you a brain dump — raw, unfiltered thoughts. Your job is to extract the key ideas and create ready-to-post content for multiple platforms.
+
+Return ONLY valid JSON (no markdown, no code fences):
+
+{
+  "key_themes": ["<theme1>", "<theme2>"],
+  "posts": {
+    ${targetPlatforms.map(p => `"${p}": ["<post1>", "<post2>", "<post3>"]`).join(',\n    ')}
+  },
+  "article_outline": {
+    "title": "<compelling title>",
+    "sections": ["<section1>", "<section2>", "<section3>"],
+    "hook": "<opening paragraph>"
+  },
+  "video_script": {
+    "title": "<video title>",
+    "hook": "<first 5 seconds>",
+    "key_points": ["<point1>", "<point2>", "<point3>"],
+    "cta": "<call to action>"
+  },
+  "hashtags": ["<tag1>", "<tag2>", "<tag3>", "<tag4>", "<tag5>"]
+}
+
+RULES:
+1. Extract EVERY usable idea from the brain dump
+2. Each post must be ready to copy-paste and publish
+3. Maintain the user's authentic voice and perspective
+4. Create variety — different angles on the same themes
+5. Make content that drives engagement, not just informs`;
+
+    const messages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: `Here's my brain dump:\n\n${thoughts}` }
+    ];
+
+    const result = await callLLM(messages);
+    if (result && typeof result === "object" && result.success === false) {
+      return res.status(500).json({ success: false, error: result.error });
+    }
+
+    let parsed;
+    try {
+      const cleaned = result.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      parsed = JSON.parse(cleaned);
+    } catch {
+      parsed = { raw_response: result, parse_error: true };
+    }
+
+    // Save brain dump
+    db.prepare(
+      "INSERT INTO content_studio_braindumps (raw_thoughts, generated_posts) VALUES (?, ?)"
+    ).run(thoughts, JSON.stringify(parsed));
+
+    res.json({ success: true, data: parsed });
+  } catch (e) {
+    console.error("[Content Studio] Brain dump error:", e.message);
+    res.status(500).json({ success: false, error: friendlyError(e, "Brain Dump") });
+  }
+});
+
+// ── Content Studio: AI Inspiration (Repurpose) ─────────────────────────────
+app.post("/api/content-studio/repurpose", async (req, res) => {
+  try {
+    const { originalContent, sourceAuthor, targetPlatform, yourVoice } = req.body;
+    if (!originalContent) return res.status(400).json({ success: false, error: "originalContent is required" });
+
+    const systemPrompt = `You are an expert content repurposing specialist. You take existing content and transform it into original pieces that capture the same VALUE but in a completely different voice and angle.
+
+${sourceAuthor ? `Original author: ${sourceAuthor}` : ''}
+Target platform: ${targetPlatform || 'general'}
+${yourVoice ? `User's voice/style: ${yourVoice}` : 'Use a warm, authentic, professional voice.'}
+
+Return ONLY valid JSON (no markdown, no code fences):
+
+{
+  "analysis": {
+    "key_insight": "<the core valuable idea>",
+    "why_it_works": "<why this content resonates>",
+    "angle_opportunities": ["<angle1>", "<angle2>", "<angle3>"]
+  },
+  "repurposed_versions": [
+    {
+      "angle": "<the unique angle>",
+      "content": "<ready-to-post content>",
+      "platform": "${targetPlatform || 'general'}"
+    },
+    {
+      "angle": "<different angle>",
+      "content": "<ready-to-post content>",
+      "platform": "${targetPlatform || 'general'}"
+    },
+    {
+      "angle": "<contrarian or expansion angle>",
+      "content": "<ready-to-post content>",
+      "platform": "${targetPlatform || 'general'}"
+    }
+  ]
+}
+
+RULES:
+1. NEVER copy — always transform with a unique perspective
+2. Extract the VALUE, not the words
+3. Each version should feel like a completely original post
+4. Add personal experience angles where possible
+5. Make each version platform-optimized`;
+
+    const messages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: `Repurpose this content:\n\n${originalContent}` }
+    ];
+
+    const result = await callLLM(messages);
+    if (result && typeof result === "object" && result.success === false) {
+      return res.status(500).json({ success: false, error: result.error });
+    }
+
+    let parsed;
+    try {
+      const cleaned = result.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      parsed = JSON.parse(cleaned);
+    } catch {
+      parsed = { raw_response: result, parse_error: true };
+    }
+
+    // Save inspiration
+    db.prepare(
+      "INSERT INTO content_studio_inspirations (source_author, original_content, repurposed_content, platform) VALUES (?, ?, ?, ?)"
+    ).run(sourceAuthor || '', originalContent, JSON.stringify(parsed), targetPlatform || 'general');
+
+    res.json({ success: true, data: parsed });
+  } catch (e) {
+    console.error("[Content Studio] Repurpose error:", e.message);
+    res.status(500).json({ success: false, error: friendlyError(e, "Content Repurposer") });
+  }
+});
+
+// ── Content Studio: AI Content Coach ────────────────────────────────────────
+app.post("/api/content-studio/coach", async (req, res) => {
+  try {
+    const { question, contentHistory } = req.body;
+    if (!question) return res.status(400).json({ success: false, error: "question is required" });
+
+    // Get content history from DB
+    const recentPosts = db.prepare(
+      "SELECT * FROM content_studio_posts ORDER BY created_at DESC LIMIT 20"
+    ).all();
+
+    const recentDumps = db.prepare(
+      "SELECT * FROM content_studio_braindumps ORDER BY created_at DESC LIMIT 5"
+    ).all();
+
+    let historyContext = "";
+    if (recentPosts.length > 0) {
+      historyContext += "\n[RECENT CONTENT CREATED]\n" + recentPosts.map(p =>
+        `- [${p.platform}/${p.content_type}] "${p.title}" (Score: ${p.score}/10, Status: ${p.status}, Created: ${p.created_at})`
+      ).join("\n");
+    }
+    if (contentHistory) {
+      historyContext += "\n[USER-PROVIDED HISTORY]\n" + contentHistory;
+    }
+
+    const systemPrompt = `You are an expert AI Content Coach — like having a personal content strategist who knows your entire posting history and what works.
+
+${historyContext}
+
+Your job:
+1. Analyze the user's content patterns and performance
+2. Recommend what to post next based on what's worked
+3. Identify content gaps and opportunities
+4. Provide specific, actionable advice — not generic tips
+5. Reference their actual content history when giving advice
+6. Suggest optimal posting times, formats, and topics
+7. Be warm, encouraging, and specific
+
+Always provide:
+- A direct answer to their question
+- 3 specific content ideas they should create next
+- 1 thing they should stop doing or change
+- 1 emerging trend they should capitalize on`;
+
+    const messages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: question }
+    ];
+
+    const result = await callLLM(messages);
+    if (result && typeof result === "object" && result.success === false) {
+      return res.status(500).json({ success: false, error: result.error });
+    }
+
+    res.json({ success: true, data: { advice: result } });
+  } catch (e) {
+    console.error("[Content Studio] Coach error:", e.message);
+    res.status(500).json({ success: false, error: friendlyError(e, "Content Coach") });
+  }
+});
+
+// ── Content Studio: Account Researcher ──────────────────────────────────────
+app.post("/api/content-studio/research-account", async (req, res) => {
+  try {
+    const { accountUrl, accountName, platform } = req.body;
+    if (!accountName && !accountUrl) return res.status(400).json({ success: false, error: "accountName or accountUrl required" });
+
+    const systemPrompt = `You are an expert social media account analyst. You analyze creator accounts and provide competitive intelligence.
+
+Given an account name/URL, provide a comprehensive analysis. Return ONLY valid JSON (no markdown, no code fences):
+
+{
+  "account_summary": {
+    "name": "${accountName || accountUrl}",
+    "platform": "${platform || 'unknown'}",
+    "niche": "<identified niche>",
+    "estimated_audience": "<audience size estimate>",
+    "content_style": "<description of their style>"
+  },
+  "content_strategy": {
+    "posting_frequency": "<how often they post>",
+    "best_content_types": ["<type1>", "<type2>"],
+    "common_themes": ["<theme1>", "<theme2>", "<theme3>"],
+    "engagement_tactics": ["<tactic1>", "<tactic2>"],
+    "hooks_they_use": ["<hook pattern 1>", "<hook pattern 2>"]
+  },
+  "what_you_can_learn": [
+    "<actionable lesson 1>",
+    "<actionable lesson 2>",
+    "<actionable lesson 3>"
+  ],
+  "content_gaps": [
+    "<topic they're missing that you could cover>",
+    "<format they don't use that you could try>"
+  ],
+  "recommended_actions": [
+    "<specific action 1>",
+    "<specific action 2>",
+    "<specific action 3>"
+  ]
+}
+
+NOTE: Base your analysis on general knowledge of the account/niche. Be specific and actionable.`;
+
+    const messages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: `Analyze this account: ${accountName || accountUrl} on ${platform || 'social media'}` }
+    ];
+
+    const result = await callLLM(messages);
+    if (result && typeof result === "object" && result.success === false) {
+      return res.status(500).json({ success: false, error: result.error });
+    }
+
+    let parsed;
+    try {
+      const cleaned = result.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      parsed = JSON.parse(cleaned);
+    } catch {
+      parsed = { raw_response: result, parse_error: true };
+    }
+
+    res.json({ success: true, data: parsed });
+  } catch (e) {
+    console.error("[Content Studio] Research error:", e.message);
+    res.status(500).json({ success: false, error: friendlyError(e, "Account Researcher") });
+  }
+});
+
+// ── Content Studio: Content History & Analytics ─────────────────────────────
+app.get("/api/content-studio/posts", (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 50;
+    const platform = req.query.platform;
+    const status = req.query.status;
+    let query = "SELECT * FROM content_studio_posts";
+    const conditions = [];
+    const params = [];
+    if (platform) { conditions.push("platform = ?"); params.push(platform); }
+    if (status) { conditions.push("status = ?"); params.push(status); }
+    if (conditions.length) query += " WHERE " + conditions.join(" AND ");
+    query += " ORDER BY created_at DESC LIMIT ?";
+    params.push(limit);
+    const posts = db.prepare(query).all(...params);
+    res.json({ success: true, data: posts });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.get("/api/content-studio/stats", (_, res) => {
+  try {
+    const total = db.prepare("SELECT COUNT(*) as c FROM content_studio_posts").get();
+    const drafts = db.prepare("SELECT COUNT(*) as c FROM content_studio_posts WHERE status = 'draft'").get();
+    const published = db.prepare("SELECT COUNT(*) as c FROM content_studio_posts WHERE status = 'published'").get();
+    const avgScore = db.prepare("SELECT AVG(score) as avg FROM content_studio_posts WHERE score > 0").get();
+    const byPlatform = db.prepare(
+      "SELECT platform, COUNT(*) as count FROM content_studio_posts GROUP BY platform"
+    ).all();
+    const byType = db.prepare(
+      "SELECT content_type, COUNT(*) as count FROM content_studio_posts GROUP BY content_type"
+    ).all();
+    const braindumps = db.prepare("SELECT COUNT(*) as c FROM content_studio_braindumps").get();
+    const inspirations = db.prepare("SELECT COUNT(*) as c FROM content_studio_inspirations").get();
+
+    res.json({
+      success: true,
+      data: {
+        totalPosts: total.c,
+        drafts: drafts.c,
+        published: published.c,
+        avgScore: Math.round((avgScore.avg || 0) * 10) / 10,
+        byPlatform,
+        byType,
+        braindumps: braindumps.c,
+        inspirations: inspirations.c
+      }
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.patch("/api/content-studio/posts/:id", (req, res) => {
+  try {
+    const { status, score, score_details, content } = req.body;
+    const id = parseInt(req.params.id);
+    const updates = [];
+    const params = [];
+    if (status) { updates.push("status = ?"); params.push(status); }
+    if (score !== undefined) { updates.push("score = ?"); params.push(score); }
+    if (score_details) { updates.push("score_details = ?"); params.push(JSON.stringify(score_details)); }
+    if (content) { updates.push("content = ?"); params.push(content); }
+    updates.push("updated_at = datetime('now')");
+    if (status === 'published') updates.push("published_at = datetime('now')");
+    params.push(id);
+    db.prepare(`UPDATE content_studio_posts SET ${updates.join(", ")} WHERE id = ?`).run(...params);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.delete("/api/content-studio/posts/:id", (req, res) => {
+  try {
+    db.prepare("DELETE FROM content_studio_posts WHERE id = ?").run(parseInt(req.params.id));
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+
+// ══════════════════════════════════════════════════════════════════════════════
 // ── Health ───────────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 app.get("/api/health", (_, res) => res.json({
   status: "ok",
-  service: "MindMappr Agent v6 — Command Center",
-  version: "6.0.0",
-  features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history"],
+  service: "MindMappr Agent v7 — Command Center + Content Studio",
+  version: "7.0.0",
+  features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher"],
   agents: Object.keys(getAllAgentDefinitions()),
   ts: new Date().toISOString(),
   tools: ["elevenlabs_tts", "generate_image", "create_video", "create_pdf", "run_python", "web_scrape", "create_csv", "create_html", "send_slack"]
@@ -1750,7 +2302,7 @@ app.get("/mindmappr/*", (req, res) => {
 // ── Start ───────────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 app.listen(PORT, () => {
-  console.log(`MindMappr Agent v6 — Command Center running on port ${PORT}`);
+  console.log(`MindMappr Agent v7 \u2014 Command Center + Content Studio running on port ${PORT}`);
   console.log(`Agents online: ${Object.values(getAllAgentDefinitions()).map(a => a.name).join(", ")}`);
   loadAndStartSchedules();
 });
