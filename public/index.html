@@ -358,6 +358,7 @@
   <div class="tab" data-tab="connections">Connections</div>
   <div class="tab" data-tab="apis">APIs</div>
   <div class="tab" data-tab="analytics">Analytics</div>
+  <div class="tab" data-tab="activity">Activity</div>
   <div class="tab" data-tab="studio">Content Studio</div>
   <div class="tab" data-tab="deploy">Deploy</div>
 </div>
@@ -568,6 +569,26 @@
       <div class="card">
         <div class="card-title" style="margin-bottom:14px">Activity — Last 30 Days</div>
         <div class="chart-bar-wrap" id="chartBars"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── ACTIVITY WINDOW ── -->
+  <div class="panel" id="panel-activity">
+    <div class="panel-inner">
+      <div class="panel-title" style="background:linear-gradient(135deg,#10b981,#06b6d4);-webkit-background-clip:text;-webkit-text-fill-color:transparent;display:inline-block">Activity Window</div>
+      <div class="panel-sub">Virtual office — see what every agent is doing right now</div>
+
+      <!-- Live Agent Status Grid -->
+      <div id="activity-live" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px;margin-top:20px"></div>
+
+      <!-- Activity Feed -->
+      <div style="margin-top:28px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <span style="font-size:14px;font-weight:600;color:var(--text2)">Recent Activity Feed</span>
+          <button onclick="loadActivityFeed()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text2);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px">Refresh</button>
+        </div>
+        <div id="activity-feed" style="max-height:400px;overflow-y:auto;display:flex;flex-direction:column;gap:6px"></div>
       </div>
     </div>
   </div>
@@ -910,6 +931,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (tab.dataset.tab === 'schedules') loadSchedules();
     if (tab.dataset.tab === 'agents') loadAgents();
     if (tab.dataset.tab === 'history') { loadTaskHistory(); loadTaskStats(); }
+    if (tab.dataset.tab === 'activity') { loadActivityLive(); loadActivityFeed(); }
     if (tab.dataset.tab === 'studio') { loadStudioStats(); loadStudioHistory(); }
     if (tab.dataset.tab === 'deploy') loadPRs();
   });
@@ -2300,9 +2322,68 @@ async function deleteStudioPost(id) {
     toast('Error: ' + e.message, 'error');
   }
 }
+// ── Activity Window ─────────────────────────────────────────────────────────────────
+async function loadActivityLive() {
+  try {
+    const r = await fetch(`${APIBASE}/activity/live`);
+    const d = await r.json();
+    const container = document.getElementById('activity-live');
+    if (!d.success || !d.data) { container.innerHTML = '<div style="color:var(--text2)">No activity data</div>'; return; }
+    container.innerHTML = d.data.map(a => {
+      const statusColor = a.status === 'busy' ? 'var(--yellow)' : 'var(--green)';
+      const statusLabel = a.status === 'busy' ? 'Busy' : 'Online';
+      const typeIcon = a.activityType === 'tool_use' ? '\u{1F527}' : a.activityType === 'thinking' ? '\u{1F4AD}' : a.activityType === 'ambient' ? '\u{1F4A4}' : '\u2705';
+      return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;border-left:3px solid ${a.color}">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <span style="font-size:24px">${a.icon}</span>
+          <div>
+            <div style="font-weight:600;font-size:14px">${a.agentName}</div>
+            <div style="display:flex;align-items:center;gap:6px;margin-top:2px">
+              <span style="width:6px;height:6px;border-radius:50%;background:${statusColor};box-shadow:0 0 6px ${statusColor}"></span>
+              <span style="font-size:11px;color:var(--text2)">${statusLabel}</span>
+            </div>
+          </div>
+          <span style="margin-left:auto;font-size:11px;color:var(--text2)">${a.taskCount} tasks</span>
+        </div>
+        <div style="font-size:13px;color:var(--text);background:var(--surface2);padding:8px 12px;border-radius:8px">
+          ${typeIcon} ${a.currentActivity}
+        </div>
+        <div style="font-size:11px;color:var(--text2);margin-top:8px">Last seen: ${new Date(a.lastSeen).toLocaleString()}</div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.error('Activity live error:', e); }
+}
 
+async function loadActivityFeed() {
+  try {
+    const r = await fetch(`${APIBASE}/activity?limit=50`);
+    const d = await r.json();
+    const container = document.getElementById('activity-feed');
+    if (!d.success || !d.data || d.data.length === 0) { container.innerHTML = '<div style="color:var(--text2);padding:12px">No recent activity</div>'; return; }
+    container.innerHTML = d.data.map(a => {
+      const typeColors = { thinking: '#f59e0b', tool_use: '#7c3aed', tool_result: '#10b981', tool_error: '#e94560', ambient: '#4a5568', completed: '#10b981', error: '#e94560' };
+      const color = typeColors[a.activity_type] || '#6b7280';
+      const time = new Date(a.started_at).toLocaleTimeString();
+      return `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--surface);border-radius:8px;border-left:3px solid ${color}">
+        <span style="font-size:11px;color:var(--text2);min-width:70px">${time}</span>
+        <span style="font-weight:600;font-size:12px;min-width:80px;color:${color}">${a.agent_name}</span>
+        <span style="font-size:11px;padding:2px 8px;border-radius:4px;background:${color}20;color:${color}">${a.activity_type}</span>
+        <span style="font-size:13px;color:var(--text);flex:1">${a.description || ''}</span>
+      </div>`;
+    }).join('');
+  } catch(e) { console.error('Activity feed error:', e); }
+}
 
-// ── Init ───────────────────────────────────────────────────────────────────────
+// Auto-refresh activity every 30 seconds when tab is active
+setInterval(() => {
+  const activityPanel = document.getElementById('panel-activity');
+  if (activityPanel && activityPanel.classList.contains('active')) {
+    loadActivityLive();
+    loadActivityFeed();
+  }
+}, 30000);
+
+// ── Init ───────────────────────────────────────────────────────────────────────────
 async function init() {
   try {
     const r = await fetch(`${APIBASE}/health`);

@@ -8,6 +8,7 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import Database from "better-sqlite3";
 import cron from "node-cron";
+import { initRexTools, executeTool as executeRexTool, parseToolCalls, getToolListForPrompt, TOOL_REGISTRY } from "./rex-tools.mjs";
 
 const execAsync = promisify(exec);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -139,6 +140,25 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
   );
+  CREATE TABLE IF NOT EXISTS agent_activity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id TEXT NOT NULL,
+    agent_name TEXT NOT NULL,
+    activity_type TEXT NOT NULL DEFAULT 'idle',
+    description TEXT,
+    status TEXT DEFAULT 'active',
+    metadata TEXT,
+    started_at TEXT DEFAULT (datetime('now')),
+    ended_at TEXT
+  );
+  CREATE TABLE IF NOT EXISTS connections (
+    id TEXT PRIMARY KEY,
+    service_name TEXT NOT NULL,
+    token TEXT NOT NULL,
+    account_name TEXT,
+    connected_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
 `);
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -200,6 +220,98 @@ if (existingFacts.c === 0) {
   const ins = db.prepare("INSERT INTO facts (category, content, source) VALUES (?, ?, 'seed')");
   for (const f of seedFacts) ins.run(f.category, f.content);
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Connections: SQLite-backed token retrieval ──────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+function getConnectionToken(serviceId) {
+  try {
+    const row = db.prepare("SELECT token FROM connections WHERE id = ?").get(serviceId);
+    return row ? row.token : null;
+  } catch { return null; }
+}
+
+// Migrate any existing file-based connections into SQLite
+try {
+  const oldConns = loadObj("connections");
+  if (oldConns && Object.keys(oldConns).length > 0) {
+    const upsert = db.prepare("INSERT OR REPLACE INTO connections (id, service_name, token, account_name, connected_at) VALUES (?, ?, ?, ?, ?)");
+    for (const [id, info] of Object.entries(oldConns)) {
+      if (info && info.token) {
+        upsert.run(id, id, info.token, info.accountName || id, info.connectedAt || new Date().toISOString());
+      }
+    }
+    console.log(`[Migration] Migrated ${Object.keys(oldConns).length} connections from JSON to SQLite`);
+  }
+} catch (e) { console.error("[Migration] Connections migration error:", e.message); }
+
+// Initialize Rex tools with DB and token getter
+initRexTools(db, getConnectionToken);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Activity Window helpers ─────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+function logActivity(agentId, agentName, activityType, description, metadata = null) {
+  try {
+    db.prepare(
+      "INSERT INTO agent_activity (agent_id, agent_name, activity_type, description, metadata) VALUES (?, ?, ?, ?, ?)"
+    ).run(agentId, agentName, activityType, description, metadata ? JSON.stringify(metadata) : null);
+  } catch (e) { console.error("[Activity] Log error:", e.message); }
+}
+
+function endActivity(activityId) {
+  try {
+    db.prepare("UPDATE agent_activity SET ended_at = datetime('now'), status = 'completed' WHERE id = ?").run(activityId);
+  } catch (e) { console.error("[Activity] End error:", e.message); }
+}
+
+// Background simulation — agents periodically log ambient activity
+const AMBIENT_ACTIVITIES = {
+  rex: [
+    "Reviewing project priorities",
+    "Scanning incoming messages",
+    "Updating task queue",
+    "Analyzing system metrics",
+    "Checking delegation results",
+  ],
+  watcher: [
+    "Monitoring API response times",
+    "Checking service health",
+    "Scanning for anomalies",
+    "Reviewing error logs",
+    "Measuring uptime metrics",
+  ],
+  scheduler: [
+    "Checking cron schedule",
+    "Preparing next task batch",
+    "Reviewing pending automations",
+    "Updating schedule timers",
+  ],
+  processor: [
+    "Idle — waiting for data",
+    "Optimizing parse buffers",
+    "Clearing processed queue",
+  ],
+  generator: [
+    "Idle — awaiting content request",
+    "Reviewing content templates",
+    "Refreshing style guidelines",
+  ],
+};
+
+function runAmbientSimulation() {
+  const allDefs = getAllAgentDefinitions();
+  for (const [id, def] of Object.entries(allDefs)) {
+    const activities = AMBIENT_ACTIVITIES[id] || ["Idle — standing by"];
+    const desc = activities[Math.floor(Math.random() * activities.length)];
+    logActivity(id, def.name, "ambient", desc);
+  }
+}
+
+// Run ambient simulation every 5 minutes
+setInterval(runAmbientSimulation, 5 * 60 * 1000);
+// Run once on startup after a short delay
+setTimeout(runAmbientSimulation, 3000);
 
 // Memory helpers
 function getMemoryContext() {
@@ -287,13 +399,28 @@ DELEGATE:processor:Parse the incoming data
 DELEGATE:generator:Create a blog post about X
 DELEGATE:scheduler:Schedule a daily task at 9am
 
+TOOL-USE: You have access to real tools you can execute. When a user asks you to do something actionable (create a repo, list droplets, review code, etc.), use tools by including lines in this EXACT format:
+TOOL:tool_name:param1:param2
+
+Examples:
+TOOL:github_list_repos:MIDNGHTSAPPHIRE
+TOOL:do_list_droplets
+TOOL:llm_code_review:function add(a,b){return a+b}
+TOOL:github_create_repo:my-new-project:A cool project:false
+
+You can call MULTIPLE tools in one response (one per line). After tools execute, you'll get results and can summarize for the user.
+
+${getToolListForPrompt()}
+
 RULES:
 1. Always respond with actionable information
 2. When asked for status, provide a concise summary
 3. Be warm, direct, and accessible — no jargon
 4. Keep responses under 200 words unless the task requires more
 5. When a task is better handled by another agent, delegate it
-6. Reference timestamps on all data points.
+6. Reference timestamps on all data points
+7. When a user asks to DO something (create, list, deploy, check), USE TOOLS — don't just explain how
+8. Always prefer tool execution over explanation
 Current date: ${new Date().toISOString().split('T')[0]}`,
   },
   watcher: {
@@ -507,34 +634,76 @@ async function invokeAgent(agentName, userMessage, sessionId = null) {
       { role: "user", content: userMessage },
     ];
 
+    // Log activity
+    logActivity(agentName, agent.name, "thinking", `Processing: ${userMessage.slice(0, 80)}...`);
+
     const result = await callAgentLLM(agentName, messages);
+    let finalText = result.text;
+    let totalInputTokens = result.usage.prompt_tokens || 0;
+    let totalOutputTokens = result.usage.completion_tokens || 0;
+    let totalElapsed = result.elapsed;
+
+    // ── Rex Tool-Use Loop ──────────────────────────────────────────────
+    if (agentName === "rex") {
+      const toolCalls = parseToolCalls(finalText);
+      if (toolCalls.length > 0) {
+        logActivity(agentName, agent.name, "tool_use", `Executing ${toolCalls.length} tool(s): ${toolCalls.map(t => t.tool).join(", ")}`);
+
+        const toolResults = [];
+        for (const tc of toolCalls) {
+          try {
+            const toolResult = await executeRexTool(tc.tool, tc.args);
+            toolResults.push({ tool: tc.tool, success: true, result: typeof toolResult === "string" ? toolResult : JSON.stringify(toolResult).slice(0, 2000) });
+            logActivity(agentName, agent.name, "tool_result", `${tc.tool}: success`);
+          } catch (toolErr) {
+            toolResults.push({ tool: tc.tool, success: false, error: toolErr.message });
+            logActivity(agentName, agent.name, "tool_error", `${tc.tool}: ${toolErr.message.slice(0, 100)}`);
+          }
+        }
+
+        // Follow-up LLM call with tool results
+        const toolResultsSummary = toolResults.map(tr =>
+          tr.success ? `✅ ${tr.tool}: ${tr.result}` : `❌ ${tr.tool}: ERROR — ${tr.error}`
+        ).join("\n\n");
+
+        messages.push(
+          { role: "assistant", content: finalText },
+          { role: "user", content: `Tool execution results:\n\n${toolResultsSummary}\n\nSummarize the results for the user in a warm, concise way. No raw JSON — just the key info.` }
+        );
+
+        const followUp = await callAgentLLM(agentName, messages);
+        finalText = followUp.text;
+        totalInputTokens += followUp.usage.prompt_tokens || 0;
+        totalOutputTokens += followUp.usage.completion_tokens || 0;
+        totalElapsed += followUp.elapsed;
+      }
+    }
 
     // Estimate cost
-    const inputTokens = result.usage.prompt_tokens || 0;
-    const outputTokens = result.usage.completion_tokens || 0;
     const pricingTable = {
       "anthropic/claude-sonnet-4": { input: 3.0, output: 15.0 },
       "anthropic/claude-3.5-haiku": { input: 0.8, output: 4.0 },
       "mistralai/mistral-small": { input: 0.1, output: 0.3 },
     };
     const pricing = pricingTable[agent.model] || { input: 1.0, output: 3.0 };
-    const cost = (inputTokens * pricing.input + outputTokens * pricing.output) / 1000000;
+    const cost = (totalInputTokens * pricing.input + totalOutputTokens * pricing.output) / 1000000;
 
     // Update task record
     db.prepare(
       "UPDATE agent_tasks SET output = ?, status = 'completed', cost_estimate = ?, tokens_used = ?, elapsed_ms = ?, completed_at = datetime('now') WHERE id = ?"
-    ).run(result.text.slice(0, 5000), Math.round(cost * 100000) / 100000, inputTokens + outputTokens, result.elapsed, taskId);
+    ).run(finalText.slice(0, 5000), Math.round(cost * 100000) / 100000, totalInputTokens + totalOutputTokens, totalElapsed, taskId);
 
     agentState[agentName].status = "online";
     agentState[agentName].totalCost += cost;
+    logActivity(agentName, agent.name, "completed", `Task completed in ${totalElapsed}ms`);
 
     return {
-      text: result.text,
+      text: finalText,
       agent: agentName,
       agentDisplay: agent.name,
       cost: Math.round(cost * 100000) / 100000,
-      elapsed: result.elapsed,
-      tokens: inputTokens + outputTokens,
+      elapsed: totalElapsed,
+      tokens: totalInputTokens + totalOutputTokens,
       taskId,
     };
   } catch (err) {
@@ -544,6 +713,7 @@ async function invokeAgent(agentName, userMessage, sessionId = null) {
     ).run(err.message.slice(0, 2000), taskId);
 
     agentState[agentName].status = "online";
+    logActivity(agentName, agent.name, "error", err.message.slice(0, 200));
     throw err;
   }
 }
@@ -1509,12 +1679,13 @@ app.delete("/api/content-studio/posts/:id", (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 app.get("/api/health", (_, res) => res.json({
   status: "ok",
-  service: "MindMappr Agent v7 — Command Center + Content Studio",
-  version: "7.0.0",
-  features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher"],
+  service: "MindMappr Agent v8 — Command Center + Content Studio + Activity Window + Rex Tools",
+  version: "8.0.0",
+  features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections"],
   agents: Object.keys(getAllAgentDefinitions()),
   ts: new Date().toISOString(),
-  tools: ["elevenlabs_tts", "generate_image", "create_video", "create_pdf", "run_python", "web_scrape", "create_csv", "create_html", "send_slack"]
+  tools: ["elevenlabs_tts", "generate_image", "create_video", "create_pdf", "run_python", "web_scrape", "create_csv", "create_html", "send_slack"],
+  rexTools: Object.keys(TOOL_REGISTRY)
 }));
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1998,7 +2169,7 @@ app.get("/api/agent/apis/models", (_, res) => res.json({
 }));
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ── Connections tab (unchanged from v4) ─────────────────────────────────────
+// ── Connections tab (v8 — SQLite-backed, wired to Rex tools) ─────────────
 // ══════════════════════════════════════════════════════════════════════════════
 const CONNECTORS = {
   slack:            { name: "Slack",           icon: "💬", color: "#4A154B", description: "Send messages, manage channels",       keyBased: true },
@@ -2007,35 +2178,49 @@ const CONNECTORS = {
   meta_ads:         { name: "Meta Ads",        icon: "📢", color: "#1877F2", description: "Manage Facebook & Instagram ads",      keyBased: false },
   stripe:           { name: "Stripe",          icon: "💳", color: "#635BFF", description: "Payments, customers, subscriptions",   keyBased: true },
   canva:            { name: "Canva",           icon: "🎨", color: "#00C4CC", description: "Create and export designs",           keyBased: false },
-  github:           { name: "GitHub",          icon: "🐙", color: "#24292E", description: "Repos, issues, deployments",          keyBased: true },
+  github:           { name: "GitHub",          icon: "🐙", color: "#24292E", description: "Repos, issues, deployments — Rex uses this for GitHub tools", keyBased: true },
   notion:           { name: "Notion",          icon: "📝", color: "#000000", description: "Pages, databases, blocks",            keyBased: true },
   airtable:         { name: "Airtable",        icon: "🗃️", color: "#18BFFF", description: "Bases, tables, records",              keyBased: true },
-  zapier:           { name: "Zapier",          icon: "⚡", color: "#FF4A00", description: "Trigger Zaps via webhooks",           keyBased: true }
+  zapier:           { name: "Zapier",          icon: "⚡", color: "#FF4A00", description: "Trigger Zaps via webhooks",           keyBased: true },
+  digitalocean:     { name: "DigitalOcean",    icon: "🌊", color: "#0080FF", description: "Droplets, apps, deployments — Rex uses this for DO tools", keyBased: true },
+  openrouter:       { name: "OpenRouter",      icon: "🧠", color: "#6366f1", description: "LLM gateway — Rex uses this for AI tool calls",       keyBased: true },
 };
 
 app.get("/api/connections/list", (_, res) => {
-  const stored = loadObj("connections");
-  const result = Object.entries(CONNECTORS).map(([id, info]) => ({
-    id, ...info,
-    connected: !!stored[id],
-    connectedAt: stored[id]?.connectedAt || null,
-    accountName: stored[id]?.accountName || null
-  }));
-  res.json({ success: true, data: result });
+  try {
+    const storedRows = db.prepare("SELECT * FROM connections").all();
+    const stored = {};
+    for (const row of storedRows) {
+      stored[row.id] = { token: row.token, accountName: row.account_name, connectedAt: row.connected_at };
+    }
+    const result = Object.entries(CONNECTORS).map(([id, info]) => ({
+      id, ...info,
+      connected: !!stored[id],
+      connectedAt: stored[id]?.connectedAt || null,
+      accountName: stored[id]?.accountName || null
+    }));
+    res.json({ success: true, data: result });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
 app.post("/api/connections/connect", (req, res) => {
-  const { id, token, accountName } = req.body;
-  if (!id || !token) return res.status(400).json({ success: false, error: "id and token required" });
-  const c = loadObj("connections");
-  c[id] = { token, accountName: accountName || id, connectedAt: new Date().toISOString() };
-  saveData("connections", c);
-  res.json({ success: true, data: { id, connected: true, accountName: c[id].accountName } });
+  try {
+    const { id, token, accountName } = req.body;
+    if (!id || !token) return res.status(400).json({ success: false, error: "id and token required" });
+    const serviceName = CONNECTORS[id]?.name || id;
+    db.prepare(
+      "INSERT OR REPLACE INTO connections (id, service_name, token, account_name, connected_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))"
+    ).run(id, serviceName, token, accountName || id);
+    res.json({ success: true, data: { id, connected: true, accountName: accountName || id } });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
 app.post("/api/connections/disconnect", (req, res) => {
-  const { id } = req.body; const c = loadObj("connections"); delete c[id]; saveData("connections", c);
-  res.json({ success: true });
+  try {
+    const { id } = req.body;
+    db.prepare("DELETE FROM connections WHERE id = ?").run(id);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2289,7 +2474,92 @@ app.post("/api/github/merge-pr", async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ── Serve frontend SPA ──────────────────────────────────────────────────────
+// ── Activity Window API ───────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+app.get("/api/activity", (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 100;
+    const agentId = req.query.agent;
+    let query = "SELECT * FROM agent_activity";
+    const params = [];
+    if (agentId) {
+      query += " WHERE agent_id = ?";
+      params.push(agentId);
+    }
+    query += " ORDER BY started_at DESC LIMIT ?";
+    params.push(limit);
+    const activities = db.prepare(query).all(...params);
+    res.json({ success: true, data: activities });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.get("/api/activity/live", (_, res) => {
+  try {
+    // Get the most recent activity for each agent (virtual office view)
+    const allDefs = getAllAgentDefinitions();
+    const liveStatus = Object.entries(allDefs).map(([id, def]) => {
+      const latest = db.prepare(
+        "SELECT * FROM agent_activity WHERE agent_id = ? ORDER BY started_at DESC LIMIT 1"
+      ).get(id);
+      const state = agentState[id] || { status: "online", lastActivity: new Date().toISOString(), taskCount: 0, totalCost: 0 };
+      return {
+        agentId: id,
+        agentName: def.name,
+        icon: def.icon,
+        color: def.color,
+        status: state.status,
+        currentActivity: latest?.description || "Standing by",
+        activityType: latest?.activity_type || "idle",
+        lastSeen: latest?.started_at || state.lastActivity,
+        taskCount: state.taskCount,
+      };
+    });
+    res.json({ success: true, data: liveStatus });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.delete("/api/activity", (_, res) => {
+  try {
+    db.prepare("DELETE FROM agent_activity WHERE started_at < datetime('now', '-7 days')").run();
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Rex Tools API ─────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+app.get("/api/tools", (_, res) => {
+  try {
+    const tools = Object.entries(TOOL_REGISTRY).map(([name, info]) => ({
+      name,
+      description: info.description,
+      category: info.category,
+      params: info.params,
+      example: info.example,
+    }));
+    res.json({ success: true, data: tools });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post("/api/tools/execute", async (req, res) => {
+  try {
+    const { tool, args } = req.body;
+    if (!tool) return res.status(400).json({ success: false, error: "tool name required" });
+    if (!TOOL_REGISTRY[tool]) return res.status(404).json({ success: false, error: `Unknown tool: ${tool}` });
+    logActivity("rex", "Rex", "tool_use", `Manual execution: ${tool}`);
+    // args can be an array (positional) or object (named) — normalize to array
+    const argsArray = Array.isArray(args) ? args : (args && typeof args === 'object' ? Object.values(args) : []);  
+    const result = await executeRexTool(tool, argsArray);
+    logActivity("rex", "Rex", "tool_result", `${tool}: completed`);
+    res.json({ success: true, data: result });
+  } catch (e) {
+    logActivity("rex", "Rex", "tool_error", `${req.body.tool}: ${e.message.slice(0, 100)}`);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Serve frontend SPA ────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 app.get("/mindmappr", (_, res) => res.sendFile(join(__dirname, "public", "index.html")));
 app.get("/mindmappr/*", (req, res) => {
@@ -2302,7 +2572,7 @@ app.get("/mindmappr/*", (req, res) => {
 // ── Start ───────────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 app.listen(PORT, () => {
-  console.log(`MindMappr Agent v7 \u2014 Command Center + Content Studio running on port ${PORT}`);
+  console.log(`MindMappr Agent v8 \u2014 Command Center + Content Studio + Activity Window + Rex Tools running on port ${PORT}`);
   console.log(`Agents online: ${Object.values(getAllAgentDefinitions()).map(a => a.name).join(", ")}`);
   loadAndStartSchedules();
 });
