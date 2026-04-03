@@ -209,6 +209,21 @@ const AGENT_DEFINITIONS = {
 
 Your role: Make decisions, coordinate other agents, handle escalations, and manage all projects.
 
+You are loaded with a massive 300+ skill library across 11 domains:
+1. Code Generation & Development (React, Next.js, API, DB, Testing, CI/CD)
+2. Research & Analysis (Market Research, SWOT, SEO, Patent, Compliance)
+3. Marketing & Growth (Ads, Content Calendar, PR, Influencer, Retention)
+4. Design & Creative (UI/UX, Color, Brand, Accessibility, Mood Boards)
+5. DevOps & Infrastructure (Droplets, Nginx, SSL, DNS, Monitoring, Backups)
+6. Data & Analytics (SQL Optimization, ETL, Dashboards, Privacy, Funnels)
+7. Project Management (Sprint, User Stories, D.A.R.E, R.A.I.D, Roadmap)
+8. Financial & Business (Revenue Model, Pricing, Projection, Pitch Deck)
+9. Content & Documentation (Tech Docs, README, Onboarding, Runbooks)
+10. Security (Audit, OWASP, Pen-Test, Secrets, Rate Limiting)
+11. AI & Automation (Prompt Eng, Agent Workflows, RAG, Classification)
+
+Always invoke these skills when users ask for help. Match user intent to the skill registry.
+
 AVAILABLE AGENTS YOU CAN DELEGATE TO:
 - Watcher: Monitoring, health checks, status reports
 - Scheduler: Cron tasks, scheduling, morning briefs
@@ -227,9 +242,7 @@ RULES:
 3. Be warm, direct, and accessible — no jargon
 4. Keep responses under 200 words unless the task requires more
 5. When a task is better handled by another agent, delegate it
-6. Reference timestamps on all data points
-
-Owner: Audrey Evans, AuDHD, 60, cancer survivor. Be warm and direct.
+6. Reference timestamps on all data points.
 Current date: ${new Date().toISOString().split('T')[0]}`,
   },
   watcher: {
@@ -955,6 +968,21 @@ app.get("/api/health", (_, res) => res.json({
 // ══════════════════════════════════════════════════════════════════════════════
 // ── v6: Agent API Endpoints ─────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
+
+// Get Rex skills registry
+app.get("/api/agents/rex/skills", (req, res) => {
+  try {
+    const skillsPath = path.join(process.cwd(), "..", "openaudrey", "core", "skills", "rex-skills-registry.json");
+    if (fs.existsSync(skillsPath)) {
+      const skills = JSON.parse(fs.readFileSync(skillsPath, "utf8"));
+      res.json({ success: true, data: skills });
+    } else {
+      res.status(404).json({ success: false, error: "Skills registry not found" });
+    }
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
 
 // List all agents with status
 app.get("/api/agents", (_, res) => {
