@@ -17,6 +17,7 @@ const PORT = parseInt(process.env.PORT || "3005");
 const LLM_API_KEY = process.env.LLM_API_KEY || "";
 const LLM_BASE_URL = "https://openrouter.ai/api/v1";
 const LLM_MODEL = process.env.LLM_MODEL || "anthropic/claude-sonnet-4";
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const UPLOADS_DIR = join(__dirname, "uploads");
 const DATA_DIR = join(__dirname, "data");
 
@@ -852,6 +853,90 @@ async function doLogin(e){
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Telegram Bot Webhook (before auth — Telegram sends unauthenticated) ────
+// ══════════════════════════════════════════════════════════════════════════════
+app.post("/api/telegram/webhook", async (req, res) => {
+  try {
+    const { message } = req.body;
+    if (!message || !message.text) return res.json({ ok: true });
+
+    const chatId = message.chat.id;
+    const userText = message.text;
+    const userName = message.from?.first_name || "User";
+
+    // Ignore /start command — send welcome
+    if (userText === "/start") {
+      const welcome = `Hey ${userName}! 👋 I'm MindMappr Bot (Rex). Send me any message and I'll help you out — just like in the Command Center.\n\nTry: \"What can you do?\" or \"Check my systems\"`;
+      await sendTelegramMessage(chatId, welcome);
+      return res.json({ ok: true });
+    }
+
+    // Route through Rex agent
+    logActivity("rex", "Rex", "telegram", `Telegram from ${userName}: ${userText.slice(0, 80)}`);
+    const result = await invokeAgent("rex", `[Telegram from ${userName}] ${userText}`, `tg-${chatId}`);
+    await sendTelegramMessage(chatId, result.text);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[Telegram] Webhook error:", err.message);
+    try {
+      const chatId = req.body?.message?.chat?.id;
+      if (chatId) await sendTelegramMessage(chatId, "Sorry, I hit a snag processing that. Please try again!");
+    } catch {}
+    res.json({ ok: true }); // Always return 200 to Telegram
+  }
+});
+
+async function sendTelegramMessage(chatId, text) {
+  const token = TELEGRAM_BOT_TOKEN || getConnectionToken("telegram");
+  if (!token) {
+    console.error("[Telegram] No bot token configured");
+    return;
+  }
+  // Telegram max message length is 4096
+  const truncated = text.length > 4000 ? text.slice(0, 4000) + "\n\n(truncated)" : text;
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: truncated,
+        parse_mode: "Markdown",
+      }),
+    });
+  } catch (err) {
+    // Retry without Markdown if parse fails
+    try {
+      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text: truncated }),
+      });
+    } catch (e) {
+      console.error("[Telegram] Send failed:", e.message);
+    }
+  }
+}
+
+// Telegram webhook setup helper
+async function setupTelegramWebhook() {
+  const token = TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  const webhookUrl = `https://mindmappr-qarz8.ondigitalocean.app/api/telegram/webhook`;
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: webhookUrl }),
+    });
+    const data = await r.json();
+    console.log(`[Telegram] Webhook setup: ${data.ok ? 'success' : data.description}`);
+  } catch (err) {
+    console.error("[Telegram] Webhook setup failed:", err.message);
+  }
+}
+
 // Auth endpoints (before auth middleware)
 app.post("/api/auth/login", (req, res) => {
   const { password } = req.body;
@@ -880,7 +965,7 @@ app.use((req, _res, next) => {
 
 // Auth middleware — protect everything except login and health
 app.use((req, res, next) => {
-  if (req.path === "/api/auth/login" || req.path === "/api/health") return next();
+  if (req.path === "/api/auth/login" || req.path === "/api/health" || req.path === "/api/telegram/webhook") return next();
   const cookies = parseCookies(req.headers.cookie);
   if (isValidSession(cookies.mm_session)) return next();
   if (req.path.startsWith("/api/")) return res.status(401).json({ error: "Unauthorized" });
@@ -2184,6 +2269,7 @@ const CONNECTORS = {
   zapier:           { name: "Zapier",          icon: "⚡", color: "#FF4A00", description: "Trigger Zaps via webhooks",           keyBased: true },
   digitalocean:     { name: "DigitalOcean",    icon: "🌊", color: "#0080FF", description: "Droplets, apps, deployments — Rex uses this for DO tools", keyBased: true },
   openrouter:       { name: "OpenRouter",      icon: "🧠", color: "#6366f1", description: "LLM gateway — Rex uses this for AI tool calls",       keyBased: true },
+  telegram:         { name: "Telegram",        icon: "✈️", color: "#0088cc", description: "MindMappr Bot — chat with Rex via @googlieeyes_bot", keyBased: true },
 };
 
 app.get("/api/connections/list", (_, res) => {
@@ -2575,4 +2661,6 @@ app.listen(PORT, () => {
   console.log(`MindMappr Agent v8 \u2014 Command Center + Content Studio + Activity Window + Rex Tools running on port ${PORT}`);
   console.log(`Agents online: ${Object.values(getAllAgentDefinitions()).map(a => a.name).join(", ")}`);
   loadAndStartSchedules();
+  // Set up Telegram webhook after a short delay to ensure server is ready
+  setTimeout(setupTelegramWebhook, 5000);
 });
