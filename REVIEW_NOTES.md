@@ -2,6 +2,51 @@
 
 ---
 
+## v8.5 — Web Search, Discord Management, Legal Agent, Stripe & Calendar (April 4, 2026)
+
+### Summary
+This release adds 11 new tools across 4 categories (search, Discord, Google Calendar, Stripe), a new Lex legal counsel agent, auto-connect services from environment variables, and the Brave Search connector.
+
+### New Agent
+- **Lex** — Legal counsel AI attorney (Claude Sonnet 4). Handles contract review, ToS drafting, cease & desist, business entity advice, IP/patent analysis, compliance checks (GDPR, CCPA, ADA, FTC), legal research, and NDA templates. Always includes AI-generated legal disclaimer.
+
+### New Tools Added
+- **`web_search`** — Web search with 3-tier fallback: Brave Search API → Google Custom Search JSON API → DuckDuckGo HTML scrape. Params: `{query, numResults?}`
+- **`discord_create_channel`** — Create text/voice channels in Discord. Params: `{name, type?, category?, topic?}`
+- **`discord_list_channels`** — List all channels in a Discord server. Params: `{guildId?}`
+- **`discord_delete_channel`** — Delete a channel by ID. Params: `{channelId}`
+- **`discord_send_message`** — Send a message to a Discord channel. Params: `{channelId, message}`
+- **`discord_create_role`** — Create a server role. Params: `{name, color?, permissions?}`
+- **`discord_list_roles`** — List all roles in a server. Params: `{guildId?}`
+- **`create_calendar_event`** — Create Google Calendar events via Calendar API v3. Params: `{title, startTime, endTime?, description?, location?}`
+- **`stripe_list_customers`** — List Stripe customers. Params: `{limit?}`
+- **`stripe_list_payments`** — List recent payment intents. Params: `{limit?}`
+- **`stripe_create_invoice`** — Create draft invoice with line items. Params: `{customer_id, items}`
+
+### Infrastructure
+- **Auto-connect services** — `autoConnectServices()` on startup seeds connections from env vars (OpenRouter, GitHub, DigitalOcean, ElevenLabs, Stripe, Brave Search)
+- **New connector** — `brave_search` added to CONNECTORS object (🔍, #FB542B)
+- **Discord connector** — `getDiscordClient()` exported for channel/role management; `ChannelType` imported from discord.js; Lex aliases added
+
+### Environment Variables Added
+- `BRAVE_SEARCH_API_KEY` — Brave Search API key (optional, DuckDuckGo fallback)
+- `GOOGLE_API_KEY` / `GOOGLE_SEARCH_CX` — Google Custom Search (optional)
+
+### Files Changed
+- `package.json` — version 8.5.0
+- `server.mjs` — 11 new tools in executeTool, Lex agent, autoConnectServices, brave_search connector, health endpoint v8.5.0
+- `rex-tools.mjs` — 11 new entries in EXTRA_TOOLS
+- `discord-connector.mjs` — ChannelType import, getDiscordClient export, lex aliases
+- `REVIEW_NOTES.md` — this changelog
+
+### Quality Standards
+- Full try/catch on every new tool with friendlyError() or explicit error messages
+- withRetry on all network-dependent tools (search, calendar, stripe)
+- Graceful "not connected" messages when services aren't configured
+- All tools registered in EXTRA_TOOLS, health endpoint, and agent system prompts
+
+---
+
 ## v8.4 — Real Tool Capabilities Upgrade (April 4, 2026)
 
 ### Summary
