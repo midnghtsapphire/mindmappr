@@ -14,10 +14,12 @@ const execAsync = promisify(exec);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = parseInt(process.env.PORT || "3005");
-const LLM_API_KEY = process.env.LLM_API_KEY || "";
+// Resolve LLM key: prefer LLM_API_KEY, fall back to OPENROUTER_API_KEY
+const LLM_API_KEY = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || "";
 const LLM_BASE_URL = "https://openrouter.ai/api/v1";
 const LLM_MODEL = process.env.LLM_MODEL || "anthropic/claude-sonnet-4";
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
 const UPLOADS_DIR = join(__dirname, "uploads");
 const DATA_DIR = join(__dirname, "data");
 
@@ -59,8 +61,8 @@ function friendlyError(err, label) {
   const msg = err.message || String(err);
   if (msg.includes("ECONNREFUSED") || msg.includes("ENOTFOUND"))
     return `Couldn't reach the ${label} service right now. Please try again in a moment.`;
-  if (msg.includes("401") || msg.includes("403"))
-    return `Authentication failed for ${label}. Please check your API key in the APIs tab.`;
+  if (msg.includes("401") || msg.includes("403") || msg.toLowerCase().includes("user not found") || msg.toLowerCase().includes("authentication failed"))
+    return `Authentication failed for ${label}. The API key may be invalid or expired. Please check the Connections tab.`;
   if (msg.includes("429"))
     return `${label} rate limit hit. Please wait a minute and try again.`;
   if (msg.includes("timeout") || msg.includes("ETIMEDOUT"))
@@ -245,6 +247,26 @@ try {
     console.log(`[Migration] Migrated ${Object.keys(oldConns).length} connections from JSON to SQLite`);
   }
 } catch (e) { console.error("[Migration] Connections migration error:", e.message); }
+
+// ── Auto-seed connections from env vars on startup ──────────────────────────
+// This ensures agents work immediately even if the user hasn't used the UI yet.
+try {
+  const envSeeds = [
+    { id: "github",       envKey: process.env.GITHUB_PAT || process.env.GITHUB_TOKEN || "",       name: "GitHub" },
+    { id: "digitalocean", envKey: process.env.DO_API_TOKEN || "",                                  name: "DigitalOcean" },
+    { id: "openrouter",   envKey: process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || "", name: "OpenRouter" },
+    { id: "telegram",     envKey: process.env.TELEGRAM_BOT_TOKEN || "",                            name: "Telegram" },
+  ];
+  const upsertConn = db.prepare(
+    "INSERT OR IGNORE INTO connections (id, service_name, token, account_name, connected_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))"
+  );
+  for (const { id, envKey, name } of envSeeds) {
+    if (envKey) {
+      upsertConn.run(id, name, envKey, name);
+    }
+  }
+  console.log("[Startup] Connection seeds applied from env vars");
+} catch (e) { console.error("[Startup] Connection seed error:", e.message); }
 
 // Initialize Rex tools with DB and token getter
 initRexTools(db, getConnectionToken);
@@ -921,17 +943,38 @@ async function sendTelegramMessage(chatId, text) {
 
 // Telegram webhook setup helper
 async function setupTelegramWebhook() {
-  const token = TELEGRAM_BOT_TOKEN;
-  if (!token) return;
-  const webhookUrl = `https://mindmappr-qarz8.ondigitalocean.app/api/telegram/webhook`;
+  const token = TELEGRAM_BOT_TOKEN || getConnectionToken("telegram");
+  if (!token) {
+    console.log("[Telegram] No bot token configured — skipping webhook setup");
+    return;
+  }
+  // Use custom domain if available, fall back to DO app URL
+  const webhookUrl = `https://mind-mappr.com/api/telegram/webhook`;
   try {
     const r = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: webhookUrl }),
+      body: JSON.stringify({
+        url: webhookUrl,
+        allowed_updates: ["message", "edited_message", "callback_query"],
+        drop_pending_updates: false,
+      }),
     });
     const data = await r.json();
-    console.log(`[Telegram] Webhook setup: ${data.ok ? 'success' : data.description}`);
+    if (data.ok) {
+      console.log(`[Telegram] Webhook registered at ${webhookUrl}`);
+    } else {
+      console.error(`[Telegram] Webhook setup failed: ${data.description}`);
+      // Try the DO URL as fallback
+      const fallbackUrl = `https://mindmappr-qarz8.ondigitalocean.app/api/telegram/webhook`;
+      const r2 = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: fallbackUrl, allowed_updates: ["message", "edited_message", "callback_query"] }),
+      });
+      const data2 = await r2.json();
+      console.log(`[Telegram] Fallback webhook: ${data2.ok ? 'success at ' + fallbackUrl : data2.description}`);
+    }
   } catch (err) {
     console.error("[Telegram] Webhook setup failed:", err.message);
   }
@@ -1762,16 +1805,22 @@ app.delete("/api/content-studio/posts/:id", (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Health ───────────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
-app.get("/api/health", (_, res) => res.json({
-  status: "ok",
-  service: "MindMappr Agent v8 — Command Center + Content Studio + Activity Window + Rex Tools",
-  version: "8.0.0",
-  features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections"],
-  agents: Object.keys(getAllAgentDefinitions()),
-  ts: new Date().toISOString(),
-  tools: ["elevenlabs_tts", "generate_image", "create_video", "create_pdf", "run_python", "web_scrape", "create_csv", "create_html", "send_slack"],
-  rexTools: Object.keys(TOOL_REGISTRY)
-}));
+app.get("/api/health", (_, res) => {
+  const connRows = db.prepare("SELECT id FROM connections").all().map(r => r.id);
+  res.json({
+    status: "ok",
+    service: "MindMappr Agent v8 — Command Center + Content Studio + Activity Window + Rex Tools",
+    version: "8.1.0",
+    features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections", "connection_validation", "telegram_bot"],
+    agents: Object.keys(getAllAgentDefinitions()),
+    ts: new Date().toISOString(),
+    tools: ["elevenlabs_tts", "generate_image", "create_video", "create_pdf", "run_python", "web_scrape", "create_csv", "create_html", "send_slack"],
+    rexTools: Object.keys(TOOL_REGISTRY),
+    llmConfigured: !!(LLM_API_KEY),
+    telegramConfigured: !!(TELEGRAM_BOT_TOKEN),
+    connectedServices: connRows,
+  });
+});
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ── v6: Agent API Endpoints ─────────────────────────────────────────────────
@@ -2289,15 +2338,60 @@ app.get("/api/connections/list", (_, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.post("/api/connections/connect", (req, res) => {
+app.post("/api/connections/connect", async (req, res) => {
   try {
     const { id, token, accountName } = req.body;
     if (!id || !token) return res.status(400).json({ success: false, error: "id and token required" });
     const serviceName = CONNECTORS[id]?.name || id;
+
+    // Validate the token before saving
+    let resolvedName = accountName || id;
+    try {
+      if (id === "github") {
+        const r = await fetch("https://api.github.com/user", {
+          headers: { "Authorization": `Bearer ${token}`, "Accept": "application/vnd.github+json" },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!r.ok) return res.status(400).json({ success: false, error: `GitHub token invalid (${r.status}). Check your PAT.` });
+        const u = await r.json();
+        resolvedName = u.login || resolvedName;
+      } else if (id === "digitalocean") {
+        const r = await fetch("https://api.digitalocean.com/v2/account", {
+          headers: { "Authorization": `Bearer ${token}` },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!r.ok) return res.status(400).json({ success: false, error: `DigitalOcean token invalid (${r.status}). Check your API token.` });
+        const u = await r.json();
+        resolvedName = u.account?.email || resolvedName;
+      } else if (id === "openrouter") {
+        const r = await fetch("https://openrouter.ai/api/v1/auth/key", {
+          headers: { "Authorization": `Bearer ${token}` },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!r.ok) return res.status(400).json({ success: false, error: `OpenRouter key invalid (${r.status}). Check your API key at openrouter.ai/keys.` });
+        const u = await r.json();
+        resolvedName = u.data?.label || u.data?.name || resolvedName;
+      } else if (id === "telegram") {
+        const r = await fetch(`https://api.telegram.org/bot${token}/getMe`, { signal: AbortSignal.timeout(8000) });
+        if (!r.ok) return res.status(400).json({ success: false, error: `Telegram bot token invalid (${r.status}).` });
+        const u = await r.json();
+        if (!u.ok) return res.status(400).json({ success: false, error: `Telegram bot token invalid: ${u.description}` });
+        resolvedName = u.result?.username ? `@${u.result.username}` : resolvedName;
+      }
+    } catch (validationErr) {
+      if (validationErr.name === "TimeoutError" || validationErr.name === "AbortError") {
+        console.warn(`[Connections] Validation timeout for ${id} — saving anyway`);
+      } else if (validationErr.message?.includes("invalid")) {
+        return res.status(400).json({ success: false, error: validationErr.message });
+      }
+      // For other errors (network issues), save anyway
+    }
+
     db.prepare(
       "INSERT OR REPLACE INTO connections (id, service_name, token, account_name, connected_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))"
-    ).run(id, serviceName, token, accountName || id);
-    res.json({ success: true, data: { id, connected: true, accountName: accountName || id } });
+    ).run(id, serviceName, token, resolvedName);
+    console.log(`[Connections] ${id} connected as ${resolvedName}`);
+    res.json({ success: true, data: { id, connected: true, accountName: resolvedName } });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 

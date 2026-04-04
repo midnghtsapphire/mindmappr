@@ -267,7 +267,8 @@ export async function do_get_droplet_status(droplet_id) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function getLLMKey() {
-  return getToken("openrouter", "LLM_API_KEY") || getToken("openai", "OPENAI_API_KEY") || "";
+  // Check SQLite connections first, then fall back to env vars
+  return getToken("openrouter", "LLM_API_KEY") || process.env.OPENROUTER_API_KEY || getToken("openai", "OPENAI_API_KEY") || "";
 }
 
 export async function llm_call(model = "anthropic/claude-sonnet-4", prompt = "", system = "") {
