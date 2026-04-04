@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, readFileSync, writeFileSync, createWriteStream } from "fs";
 import { join, dirname, extname, basename } from "path";
 import { fileURLToPath } from "url";
 import { randomUUID, createHash } from "crypto";
@@ -8,7 +8,10 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import Database from "better-sqlite3";
 import cron from "node-cron";
-import { initRexTools, executeTool as executeRexTool, parseToolCalls, getToolListForPrompt, TOOL_REGISTRY } from "./rex-tools.mjs";
+import PDFDocument from "pdfkit";
+import ExcelJS from "exceljs";
+import nodemailer from "nodemailer";
+import { initRexTools, executeTool as executeRexTool, parseToolCalls, getToolListForPrompt, TOOL_REGISTRY, EXTRA_TOOLS } from "./rex-tools.mjs";
 import { initDiscord, startDiscordBot, sendDiscordNotification, getDiscordStatus, disconnectDiscord } from "./discord-connector.mjs";
 
 const execAsync = promisify(exec);
@@ -24,6 +27,11 @@ const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || "";
 const UPLOADS_DIR = join(__dirname, "uploads");
 const DATA_DIR = join(__dirname, "data");
+
+// Google OAuth2 configuration
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
+const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "";
 
 [UPLOADS_DIR, DATA_DIR].forEach(d => { if (!existsSync(d)) mkdirSync(d, { recursive: true }); });
 
@@ -292,6 +300,83 @@ function getConnectionToken(serviceId) {
     const row = db.prepare("SELECT token FROM connections WHERE id = ?").get(serviceId);
     return row ? row.token : null;
   } catch { return null; }
+}
+
+// Google OAuth2 token refresh helper
+async function getGoogleAccessToken() {
+  try {
+    // Try SQLite first
+    const row = db.prepare("SELECT token FROM connections WHERE id = 'google'").get();
+    if (!row) {
+      // Fallback to JSON file
+      const c = loadObj("connections");
+      const google = c["google"];
+      if (!google || !google.refreshToken) return null;
+      return await refreshGoogleToken(google, c);
+    }
+    let googleData;
+    try { googleData = JSON.parse(row.token); } catch { return row.token; }
+    if (!googleData.refreshToken) return googleData.token || null;
+    // Check if token is still valid (with 60s buffer)
+    if (googleData.expiresAt && Date.now() < googleData.expiresAt - 60000) {
+      return googleData.token;
+    }
+    // Refresh the token
+    const r = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        refresh_token: googleData.refreshToken,
+        grant_type: "refresh_token"
+      })
+    });
+    const tokens = await r.json();
+    if (tokens.access_token) {
+      googleData.token = tokens.access_token;
+      googleData.expiresAt = Date.now() + (tokens.expires_in * 1000);
+      // Update SQLite
+      db.prepare("UPDATE connections SET token = ?, updated_at = datetime('now') WHERE id = 'google'").run(JSON.stringify(googleData));
+      db.prepare("UPDATE connections SET token = ?, updated_at = datetime('now') WHERE id = 'gmail'").run(JSON.stringify(googleData));
+      db.prepare("UPDATE connections SET token = ?, updated_at = datetime('now') WHERE id = 'google_drive'").run(JSON.stringify(googleData));
+      db.prepare("UPDATE connections SET token = ?, updated_at = datetime('now') WHERE id = 'google_calendar'").run(JSON.stringify(googleData));
+      // Update JSON file too
+      const c = loadObj("connections");
+      if (c["google"]) { c["google"].token = tokens.access_token; c["google"].expiresAt = googleData.expiresAt; saveData("connections", c); }
+      console.log("[Google OAuth] Token refreshed successfully");
+      return tokens.access_token;
+    }
+    console.error("[Google OAuth] Token refresh failed:", tokens);
+    return googleData.token; // Return old token as fallback
+  } catch (err) {
+    console.error("[Google OAuth] getGoogleAccessToken error:", err.message);
+    return null;
+  }
+}
+
+async function refreshGoogleToken(google, c) {
+  if (google.expiresAt && Date.now() < google.expiresAt - 60000) return google.token;
+  try {
+    const r = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        refresh_token: google.refreshToken,
+        grant_type: "refresh_token"
+      })
+    });
+    const tokens = await r.json();
+    if (tokens.access_token) {
+      google.token = tokens.access_token;
+      google.expiresAt = Date.now() + (tokens.expires_in * 1000);
+      saveData("connections", c);
+      return tokens.access_token;
+    }
+  } catch {}
+  return google.token;
 }
 
 // Migrate any existing file-based connections into SQLite
@@ -1082,6 +1167,76 @@ app.get("/api/auth/logout", (req, res) => {
   res.redirect("/");
 });
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Google OAuth2 Flow (before auth middleware) ─────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+app.get("/api/google/auth", (req, res) => {
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_REDIRECT_URI) {
+    return res.status(500).send("Google OAuth not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI environment variables.");
+  }
+  const scopes = [
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/documents",
+    "https://www.googleapis.com/auth/spreadsheets"
+  ];
+  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(GOOGLE_REDIRECT_URI)}&response_type=code&scope=${encodeURIComponent(scopes.join(" "))}&access_type=offline&prompt=consent`;
+  res.redirect(authUrl);
+});
+
+app.get("/api/google/callback", async (req, res) => {
+  try {
+    const { code } = req.query;
+    if (!code) return res.status(400).send("Missing authorization code.");
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        redirect_uri: GOOGLE_REDIRECT_URI,
+        grant_type: "authorization_code"
+      })
+    });
+    const tokens = await tokenResponse.json();
+    if (!tokens.access_token) {
+      console.error("[Google OAuth] Token exchange failed:", tokens);
+      return res.status(500).send("Google authentication failed. Please try again.");
+    }
+    // Store the Google connection
+    const c = loadObj("connections");
+    c["google"] = {
+      token: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      expiresAt: Date.now() + (tokens.expires_in * 1000),
+      accountName: "Google Workspace",
+      connectedAt: new Date().toISOString()
+    };
+    saveData("connections", c);
+    // Also store in SQLite connections table for the UI
+    const googleData = { token: tokens.access_token, refreshToken: tokens.refresh_token, expiresAt: Date.now() + (tokens.expires_in * 1000) };
+    db.prepare(
+      "INSERT OR REPLACE INTO connections (id, service_name, token, account_name, connected_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))"
+    ).run("google", "Google", JSON.stringify(googleData), "Google Workspace");
+    db.prepare(
+      "INSERT OR REPLACE INTO connections (id, service_name, token, account_name, connected_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))"
+    ).run("gmail", "Gmail", JSON.stringify(googleData), "Gmail (Google)");
+    db.prepare(
+      "INSERT OR REPLACE INTO connections (id, service_name, token, account_name, connected_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))"
+    ).run("google_drive", "Google Drive", JSON.stringify(googleData), "Google Drive");
+    db.prepare(
+      "INSERT OR REPLACE INTO connections (id, service_name, token, account_name, connected_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))"
+    ).run("google_calendar", "Google Calendar", JSON.stringify(googleData), "Google Calendar");
+    console.log("[Google OAuth] Successfully connected Google Workspace");
+    res.redirect("/mindmappr?connected=google");
+  } catch (err) {
+    console.error("[Google OAuth] Callback error:", err.message);
+    res.status(500).send("Google authentication failed. Please try again.");
+  }
+});
+
 // URL rewrite — normalize /mindmappr/api/* to /api/* BEFORE auth check
 app.use((req, _res, next) => {
   if (req.url.startsWith("/mindmappr/api/") || req.url.startsWith("/mindmappr/api?")) {
@@ -1090,9 +1245,9 @@ app.use((req, _res, next) => {
   next();
 });
 
-// Auth middleware — protect everything except login and health
+// Auth middleware — protect everything except login, health, and Google OAuth
 app.use((req, res, next) => {
-  if (req.path === "/api/auth/login" || req.path === "/api/health" || req.path === "/api/telegram/webhook") return next();
+  if (req.path === "/api/auth/login" || req.path === "/api/health" || req.path === "/api/telegram/webhook" || req.path === "/api/google/auth" || req.path === "/api/google/callback") return next();
   const cookies = parseCookies(req.headers.cookie);
   if (isValidSession(cookies.mm_session)) return next();
   if (req.path.startsWith("/api/")) return res.status(401).json({ error: "Unauthorized" });
@@ -1194,44 +1349,157 @@ async function executeTool(tool, params) {
     }, { retries: 3, baseDelay: 2000, label: "ElevenLabs TTS" });
   }
 
-  // ── Generate image (ImageMagick) ──
+  // ── Generate image (Leonardo AI → DALL-E fallback) ──
   if (tool === "generate_image") {
     return await withRetry(async () => {
+      const prompt = params.prompt || "A beautiful abstract artwork";
+      const width = params.width || 1024;
+      const height = params.height || 1024;
       const fname = `img_${Date.now()}.png`;
       const fpath = join(UPLOADS_DIR, fname);
-      const w = params.width || 800; const h = params.height || 600;
-      const safe = (params.prompt || "Generated image").replace(/["\\`$]/g, "").slice(0, 80);
-      await execAsync(`convert -size ${w}x${h} gradient:"#1a1a2e"-"#16213e" -font DejaVu-Sans -pointsize 28 -fill "#e94560" -gravity Center -annotate 0 "${safe}" "${fpath}"`);
+
+      const LEONARDO_KEY = process.env.LEONARDO_API_KEY;
+      const OPENAI_KEY = process.env.OPENAI_API_KEY;
+
+      let imageUrl = null;
+
+      // Try Leonardo AI first
+      if (LEONARDO_KEY) {
+        try {
+          const genRes = await fetch("https://cloud.leonardo.ai/api/rest/v1/generations", {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${LEONARDO_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              prompt,
+              modelId: "b24e16ff-06e3-43eb-8d33-4416c2d75876", // Leonardo Diffusion XL
+              width: Math.min(width, 1024),
+              height: Math.min(height, 1024),
+              num_images: 1,
+              guidance_scale: 7,
+            }),
+            signal: AbortSignal.timeout(60000),
+          });
+          if (genRes.ok) {
+            const genData = await genRes.json();
+            const generationId = genData?.sdGenerationJob?.generationId;
+            if (generationId) {
+              // Poll for result (up to 60s)
+              for (let i = 0; i < 12; i++) {
+                await new Promise(r => setTimeout(r, 5000));
+                const pollRes = await fetch(`https://cloud.leonardo.ai/api/rest/v1/generations/${generationId}`, {
+                  headers: { "Authorization": `Bearer ${LEONARDO_KEY}` },
+                  signal: AbortSignal.timeout(10000),
+                });
+                if (pollRes.ok) {
+                  const pollData = await pollRes.json();
+                  const imgs = pollData?.generations_by_pk?.generated_images;
+                  if (imgs && imgs.length > 0) { imageUrl = imgs[0].url; break; }
+                }
+              }
+            }
+          }
+        } catch (leonardoErr) {
+          console.warn(`[generate_image] Leonardo failed: ${leonardoErr.message}, falling back to DALL-E`);
+        }
+      }
+
+      // Fallback to DALL-E 3
+      if (!imageUrl && OPENAI_KEY) {
+        const dalleRes = await fetch("https://api.openai.com/v1/images/generations", {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${OPENAI_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "dall-e-3",
+            prompt: prompt.slice(0, 4000),
+            n: 1,
+            size: width >= 1792 ? "1792x1024" : width >= 1024 ? "1024x1024" : "1024x1024",
+            response_format: "url",
+          }),
+          signal: AbortSignal.timeout(60000),
+        });
+        if (!dalleRes.ok) {
+          const err = await dalleRes.text();
+          throw new Error(`DALL-E error: ${err.slice(0, 200)}`);
+        }
+        const dalleData = await dalleRes.json();
+        imageUrl = dalleData?.data?.[0]?.url;
+      }
+
+      if (!imageUrl) throw new Error("Image generation failed — no LEONARDO_API_KEY or OPENAI_API_KEY configured.");
+
+      // Download image to uploads
+      const imgRes = await fetch(imageUrl, { signal: AbortSignal.timeout(30000) });
+      if (!imgRes.ok) throw new Error("Failed to download generated image");
+      const buf = Buffer.from(await imgRes.arrayBuffer());
+      writeFileSync(fpath, buf);
       const size = statSync(fpath).size;
       saveMeta(fname, size, "image/png", "mindmappr");
-      return { success: true, file: fname, type: "image", message: "Image created" };
-    }, { retries: 2, baseDelay: 1000, label: "Image generation" });
+      return { success: true, file: fname, type: "image", message: `Image generated: "${prompt.slice(0, 60)}"` };
+    }, { retries: 1, baseDelay: 2000, label: "Image generation" });
   }
 
-  // ── Create video (FFmpeg) ──
+  // ── Create video (HeyGen AI) ──
   if (tool === "create_video") {
     return await withRetry(async () => {
+      const HEYGEN_KEY = process.env.HEYGEN_API_KEY;
+      if (!HEYGEN_KEY) throw new Error("HeyGen API key not configured. Set HEYGEN_API_KEY env var.");
+
+      const script = params.script || params.text || params.content || "Hello from MindMappr!";
+      const avatarId = params.avatar_id || "Angela-inblackskirt-20220820"; // default HeyGen avatar
+      const voiceId = params.voice_id || "2d5b0e6cf36f460aa7fc47e3eee4ba54"; // default voice
+      const title = params.title || "MindMappr Video";
+
+      // Create video generation job
+      const createRes = await fetch("https://api.heygen.com/v2/video/generate", {
+        method: "POST",
+        headers: { "X-Api-Key": HEYGEN_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          video_inputs: [{
+            character: { type: "avatar", avatar_id: avatarId, avatar_style: "normal" },
+            voice: { type: "text", input_text: script.slice(0, 1500), voice_id: voiceId },
+            background: { type: "color", value: "#1a1a2e" },
+          }],
+          dimension: { width: 1280, height: 720 },
+          title,
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!createRes.ok) {
+        const errText = await createRes.text();
+        throw new Error(`HeyGen video create failed (${createRes.status}): ${errText.slice(0, 200)}`);
+      }
+      const createData = await createRes.json();
+      const videoId = createData?.data?.video_id;
+      if (!videoId) throw new Error("HeyGen did not return a video_id");
+
+      // Poll for completion (up to 5 minutes)
+      let videoUrl = null;
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 10000));
+        const statusRes = await fetch(`https://api.heygen.com/v1/video_status.get?video_id=${videoId}`, {
+          headers: { "X-Api-Key": HEYGEN_KEY },
+          signal: AbortSignal.timeout(15000),
+        });
+        if (statusRes.ok) {
+          const statusData = await statusRes.json();
+          const status = statusData?.data?.status;
+          if (status === "completed") { videoUrl = statusData?.data?.video_url; break; }
+          if (status === "failed") throw new Error(`HeyGen video failed: ${statusData?.data?.error || "unknown error"}`);
+        }
+      }
+      if (!videoUrl) throw new Error("HeyGen video timed out after 5 minutes. Check HeyGen dashboard.");
+
+      // Download video
       const fname = `video_${Date.now()}.mp4`;
       const fpath = join(UPLOADS_DIR, fname);
-      const audPath = params.audio_file ? join(UPLOADS_DIR, basename(params.audio_file)) : null;
-      const imgPath = params.image_file ? join(UPLOADS_DIR, basename(params.image_file)) : null;
-      let cmd;
-      if (imgPath && existsSync(imgPath) && audPath && existsSync(audPath)) {
-        cmd = `ffmpeg -loop 1 -i "${imgPath}" -i "${audPath}" -c:v libx264 -tune stillimage -c:a aac -b:a 192k -pix_fmt yuv420p -shortest -y "${fpath}"`;
-      } else if (audPath && existsSync(audPath)) {
-        const tmp = join(UPLOADS_DIR, `tmp_${Date.now()}.png`);
-        const title = (params.title || "MindMappr").replace(/["\\`$]/g, "").slice(0, 50);
-        await execAsync(`convert -size 1280x720 gradient:"#1a1a2e"-"#0f3460" -font DejaVu-Sans -pointsize 48 -fill white -gravity Center -annotate 0 "${title}" "${tmp}"`);
-        cmd = `ffmpeg -loop 1 -i "${tmp}" -i "${audPath}" -c:v libx264 -tune stillimage -c:a aac -b:a 192k -pix_fmt yuv420p -shortest -y "${fpath}"`;
-        setTimeout(() => { try { unlinkSync(tmp); } catch {} }, 30000);
-      } else {
-        throw new Error("Need an audio file first. Ask me to generate audio, then I can make the video.");
-      }
-      await execAsync(cmd, { timeout: 120000 });
+      const vidRes = await fetch(videoUrl, { signal: AbortSignal.timeout(120000) });
+      if (!vidRes.ok) throw new Error("Failed to download HeyGen video");
+      const buf = Buffer.from(await vidRes.arrayBuffer());
+      writeFileSync(fpath, buf);
       const size = statSync(fpath).size;
       saveMeta(fname, size, "video/mp4", "mindmappr");
-      return { success: true, file: fname, type: "video", message: `Video ready (${Math.round(size / 1024 / 1024 * 10) / 10}MB)` };
-    }, { retries: 2, baseDelay: 2000, label: "Video creation" });
+      return { success: true, file: fname, type: "video", videoId, message: `AI video ready (${Math.round(size / 1024 / 1024 * 10) / 10}MB) — ${title}` };
+    }, { retries: 1, baseDelay: 3000, label: "HeyGen video creation" });
   }
 
   // ── Create document (Markdown) ──
@@ -1325,6 +1593,534 @@ async function executeTool(tool, params) {
       if (!d.ok) throw new Error(`Slack: ${d.error}`);
       return { success: true, message: "Message sent to Slack" };
     }, { retries: 2, baseDelay: 1000, label: "Slack" });
+  }
+
+  // ── Fill PDF (PDFiller API) ──
+  if (tool === "fill_pdf") {
+    return await withRetry(async () => {
+      const PDFFILLER_KEY = process.env.PDFFILLER_API_KEY || "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImp0aSI6Ijc2NjNjNzExMWJiYTA3MTk0ZTlmZGQ5NWQ3NDgxMTJiOTkyOWRmMzA0NzI1NjE0NWY3OTc5NmZhNzkxMGM0Yzk2MDYyNDMyZDU1MzUwNjBhIn0.eyJhdWQiOiIwIiwianRpIjoiNzY2M2M3MTExYmJhMDcxOTRlOWZkZDk1ZDc0ODExMmI5OTI5ZGYzMDQ3MjU2MTQ1Zjc5Nzk2ZmE3OTEwYzRjOTYwNjI0MzJkNTUzNTA2MGEiLCJpYXQiOjE3NzIyMDQ1OTgsIm5iZiI6MTc3MjIwNDU5OCwiZXhwIjoxODAzNzQwNTk4LCJzdWIiOiI2ODgyODAyMjQiLCJzY29wZXMiOltdfQ.aToyOOY9rjK4B5wQLdXStmYlGES8KVuyX53j0OMq5GPBLL-M4rjBAHYfWz8W2PNPTmVZbsFiSNY5FK2Ylp0HH-wdQD8b4MZm3TGEYxPT_0Zd24RbCW3HZiAJS1GuIRo17fqIw3py4rnhz0F8aN4lMsJ0IEhqBRFRaud6qqv3wxM3ugxJwngAz1LHP7SfRG0hipO4OM-Z2xIbGxesO5wKR3dK_uPhjaGQnkPOLbOc8Zfplqnmj4gLm31MH4wHlQrktEGJNd9yWZomDpplLv-kH26dpAWCFXP2Sr4lPjyPWV7eyYGptKQ1TfVUK8_UipzLeN7yZnCaYNHbhfZvyrp0upGVc5mpcbrkznSXKXfBClzNCM-S422RKAunCo61mFIzy8qcRdsCre-1PfHcjZbLfj5dpFLVDoQ3L0sRcouqu5fNEkJ12u9-jN3gawx310sKhb3p39kH_V_uq-HnLm9aGP1IuvWBn8GIvW4Dnm8Wczz1UD-kbpf6RVZnOkQFGvky9ILOfmlIOVUYzR9Y5vRPBjjSxy0rqzbrpt-fwb3Ihkp3JA_AhADIPQGvGWR-HIEEE9NR8IqT4xX3JjN5E_jppJI3EDLJnimP-QZzQuK0wajcYSFbU7GhjiQ7td55ed1HDHSwpHEJJJFhxL8sCuEYktWlOt8gLv_yYrXSPHi-m-Q";
+      const BASE = "https://api.pdffiller.com/v2";
+      const headers = { "Authorization": `Bearer ${PDFFILLER_KEY}`, "Content-Type": "application/json" };
+
+      // If document_id provided, fill fields on existing doc
+      if (params.document_id && params.fields) {
+        const docId = params.document_id;
+        const fields = params.fields; // { field_name: value, ... }
+
+        // Get fillable fields for the document
+        const fieldsRes = await fetch(`${BASE}/fillable_templates/${docId}/fields`, {
+          headers, signal: AbortSignal.timeout(15000),
+        });
+        if (!fieldsRes.ok) throw new Error(`PDFiller get fields failed (${fieldsRes.status})`);
+        const fieldsData = await fieldsRes.json();
+        const availableFields = fieldsData?.items || [];
+
+        // Build fill request
+        const fillPayload = availableFields
+          .filter(f => fields[f.name] !== undefined)
+          .map(f => ({ id: f.id, value: String(fields[f.name]) }));
+
+        if (fillPayload.length === 0) {
+          return { success: false, error: `No matching fields found. Available: ${availableFields.map(f => f.name).join(", ")}` };
+        }
+
+        const fillRes = await fetch(`${BASE}/fillable_templates/${docId}/filled_pdfs`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ fillable_fields: fillPayload }),
+          signal: AbortSignal.timeout(30000),
+        });
+        if (!fillRes.ok) {
+          const errText = await fillRes.text();
+          throw new Error(`PDFiller fill failed (${fillRes.status}): ${errText.slice(0, 200)}`);
+        }
+        const fillData = await fillRes.json();
+        const filledId = fillData?.id;
+        if (!filledId) throw new Error("PDFiller did not return filled PDF id");
+
+        // Download the filled PDF
+        const dlRes = await fetch(`${BASE}/filled_pdfs/${filledId}/download`, {
+          headers: { "Authorization": `Bearer ${PDFFILLER_KEY}` },
+          signal: AbortSignal.timeout(60000),
+        });
+        if (!dlRes.ok) throw new Error(`PDFiller download failed (${dlRes.status})`);
+        const fname = `filled_${docId}_${Date.now()}.pdf`;
+        const fpath = join(UPLOADS_DIR, fname);
+        const buf = Buffer.from(await dlRes.arrayBuffer());
+        writeFileSync(fpath, buf);
+        const size = statSync(fpath).size;
+        saveMeta(fname, size, "application/pdf", "mindmappr");
+        return { success: true, file: fname, type: "pdf", filledId, message: `PDF filled and ready: ${fname}` };
+      }
+
+      // If no document_id, list available templates
+      const listRes = await fetch(`${BASE}/fillable_templates?per_page=20`, {
+        headers, signal: AbortSignal.timeout(15000),
+      });
+      if (!listRes.ok) throw new Error(`PDFiller list templates failed (${listRes.status})`);
+      const listData = await listRes.json();
+      const templates = (listData?.items || []).map(t => ({ id: t.id, name: t.name, pages: t.total_pages }));
+      return { success: true, templates, message: `Found ${templates.length} fillable templates. Use document_id + fields to fill one.` };
+    }, { retries: 2, baseDelay: 2000, label: "PDFiller" });
+  }
+
+  // ── Create Real PDF (pdfkit) ──
+  if (tool === "create_real_pdf") {
+    try {
+      const fname = `pdf_${Date.now()}.pdf`;
+      const fpath = join(UPLOADS_DIR, fname);
+      const title = params.title || "Document";
+      const content = params.content || "";
+      const sections = params.sections || [];
+
+      return await new Promise((resolve, reject) => {
+        try {
+          const doc = new PDFDocument({ size: "A4", margin: 50, info: { Title: title, Author: "MindMappr", Creator: "MindMappr v8.3" } });
+          const stream = doc.pipe(createWriteStream(fpath));
+
+          // Title
+          doc.fontSize(24).font("Helvetica-Bold").fillColor("#1a1a2e").text(title, { align: "center" });
+          doc.moveDown(0.5);
+          doc.fontSize(10).font("Helvetica").fillColor("#666").text(`Generated by MindMappr — ${new Date().toLocaleDateString()}`, { align: "center" });
+          doc.moveDown(1);
+          doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor("#e94560").lineWidth(2).stroke();
+          doc.moveDown(1);
+
+          // Main content
+          if (content) {
+            doc.fontSize(12).font("Helvetica").fillColor("#333");
+            const paragraphs = content.split("\n");
+            for (const p of paragraphs) {
+              if (p.trim()) {
+                if (p.startsWith("# ")) {
+                  doc.fontSize(18).font("Helvetica-Bold").fillColor("#1a1a2e").text(p.slice(2).trim());
+                  doc.moveDown(0.5);
+                } else if (p.startsWith("## ")) {
+                  doc.fontSize(15).font("Helvetica-Bold").fillColor("#333").text(p.slice(3).trim());
+                  doc.moveDown(0.3);
+                } else if (p.startsWith("### ")) {
+                  doc.fontSize(13).font("Helvetica-Bold").fillColor("#444").text(p.slice(4).trim());
+                  doc.moveDown(0.3);
+                } else if (p.startsWith("- ") || p.startsWith("* ")) {
+                  doc.fontSize(12).font("Helvetica").fillColor("#333").text(`  \u2022 ${p.slice(2).trim()}`, { indent: 15 });
+                } else {
+                  doc.fontSize(12).font("Helvetica").fillColor("#333").text(p.trim(), { lineGap: 4 });
+                }
+                doc.moveDown(0.3);
+              }
+            }
+          }
+
+          // Sections
+          for (const section of sections) {
+            doc.moveDown(0.5);
+            if (section.heading) {
+              doc.fontSize(16).font("Helvetica-Bold").fillColor("#1a1a2e").text(section.heading);
+              doc.moveDown(0.3);
+            }
+            if (section.body) {
+              doc.fontSize(12).font("Helvetica").fillColor("#333").text(section.body, { lineGap: 4 });
+              doc.moveDown(0.3);
+            }
+            if (section.items && Array.isArray(section.items)) {
+              for (const item of section.items) {
+                doc.fontSize(12).font("Helvetica").fillColor("#333").text(`  \u2022 ${item}`, { indent: 15 });
+              }
+              doc.moveDown(0.3);
+            }
+            if (section.table && Array.isArray(section.table)) {
+              // Simple table rendering
+              const tableData = section.table;
+              if (tableData.length > 0) {
+                const colCount = tableData[0].length || 1;
+                const colWidth = (495 / colCount);
+                const startX = 50;
+                let y = doc.y;
+                for (let ri = 0; ri < tableData.length; ri++) {
+                  const row = tableData[ri];
+                  const isHeader = ri === 0;
+                  if (isHeader) {
+                    doc.font("Helvetica-Bold").fontSize(10).fillColor("#fff");
+                    doc.rect(startX, y, 495, 22).fill("#1a1a2e");
+                  } else {
+                    doc.font("Helvetica").fontSize(10).fillColor("#333");
+                    if (ri % 2 === 0) doc.rect(startX, y, 495, 20).fill("#f5f5f5");
+                  }
+                  doc.fillColor(isHeader ? "#fff" : "#333");
+                  for (let ci = 0; ci < colCount; ci++) {
+                    const cellText = String((Array.isArray(row) ? row[ci] : row) || "");
+                    doc.text(cellText, startX + ci * colWidth + 4, y + (isHeader ? 5 : 4), { width: colWidth - 8, height: isHeader ? 22 : 20 });
+                  }
+                  y += isHeader ? 22 : 20;
+                  doc.y = y;
+                }
+                doc.moveDown(0.5);
+              }
+            }
+          }
+
+          // Footer
+          doc.moveDown(2);
+          doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor("#ddd").lineWidth(0.5).stroke();
+          doc.moveDown(0.3);
+          doc.fontSize(8).font("Helvetica").fillColor("#999").text("Generated by MindMappr — AI-powered document creation", { align: "center" });
+
+          doc.end();
+          stream.on("finish", () => {
+            const size = statSync(fpath).size;
+            saveMeta(fname, size, "application/pdf", "mindmappr");
+            resolve({ success: true, file: fname, type: "pdf", message: `PDF document ready: ${title} (${Math.round(size / 1024)}KB)` });
+          });
+          stream.on("error", (err) => reject(err));
+        } catch (innerErr) {
+          reject(innerErr);
+        }
+      });
+    } catch (e) { return { success: false, error: friendlyError(e, "PDF creation") }; }
+  }
+
+  // ── Create Spreadsheet (exceljs) ──
+  if (tool === "create_spreadsheet") {
+    try {
+      const rawName = params.filename || `spreadsheet_${Date.now()}`;
+      const fname = basename(rawName).replace(/[^a-zA-Z0-9._-]/g, "_");
+      const finalName = fname.endsWith(".xlsx") ? fname : fname + ".xlsx";
+      const fpath = join(UPLOADS_DIR, finalName);
+      const sheetsData = params.sheets || [{ name: "Sheet1", headers: ["Column A"], rows: [["Data"]] }];
+
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = "MindMappr";
+      workbook.created = new Date();
+
+      for (const sheetDef of sheetsData) {
+        const ws = workbook.addWorksheet(sheetDef.name || "Sheet");
+        const headers = sheetDef.headers || [];
+        const rows = sheetDef.rows || [];
+
+        // Add headers with bold formatting
+        if (headers.length > 0) {
+          const headerRow = ws.addRow(headers);
+          headerRow.eachCell((cell) => {
+            cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+            cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1A1A2E" } };
+            cell.alignment = { horizontal: "center", vertical: "middle" };
+            cell.border = {
+              top: { style: "thin" }, bottom: { style: "thin" },
+              left: { style: "thin" }, right: { style: "thin" }
+            };
+          });
+        }
+
+        // Add data rows
+        for (const row of rows) {
+          const dataRow = ws.addRow(Array.isArray(row) ? row : [row]);
+          dataRow.eachCell((cell) => {
+            cell.border = {
+              top: { style: "thin", color: { argb: "FFE0E0E0" } },
+              bottom: { style: "thin", color: { argb: "FFE0E0E0" } },
+              left: { style: "thin", color: { argb: "FFE0E0E0" } },
+              right: { style: "thin", color: { argb: "FFE0E0E0" } }
+            };
+          });
+        }
+
+        // Auto-width columns
+        ws.columns.forEach((col, i) => {
+          let maxLen = headers[i] ? String(headers[i]).length : 10;
+          rows.forEach(row => {
+            const val = Array.isArray(row) ? row[i] : row;
+            if (val) maxLen = Math.max(maxLen, String(val).length);
+          });
+          col.width = Math.min(Math.max(maxLen + 2, 10), 50);
+        });
+      }
+
+      await workbook.xlsx.writeFile(fpath);
+      const size = statSync(fpath).size;
+      saveMeta(finalName, size, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "mindmappr");
+      const totalRows = sheetsData.reduce((sum, s) => sum + (s.rows?.length || 0), 0);
+      return { success: true, file: finalName, type: "xlsx", message: `Spreadsheet ready: ${finalName} (${sheetsData.length} sheet(s), ${totalRows} rows)` };
+    } catch (e) { return { success: false, error: friendlyError(e, "Spreadsheet creation") }; }
+  }
+
+  // ── Send Email (Gmail API) ──
+  if (tool === "send_email") {
+    const accessToken = await getGoogleAccessToken();
+    if (!accessToken) {
+      return { success: false, error: "Google not connected. Please connect Google in the Connections tab first." };
+    }
+    return await withRetry(async () => {
+      const to = params.to;
+      const subject = params.subject || "(No subject)";
+      const body = params.body || "";
+      if (!to) throw new Error("Recipient email address (to) is required.");
+
+      // Build RFC 2822 email
+      const boundary = `boundary_${Date.now()}`;
+      let emailParts = [
+        `To: ${to}`,
+        `Subject: ${subject}`,
+        `MIME-Version: 1.0`,
+      ];
+
+      if (params.attachments && Array.isArray(params.attachments) && params.attachments.length > 0) {
+        emailParts.push(`Content-Type: multipart/mixed; boundary="${boundary}"`, "");
+        emailParts.push(`--${boundary}`);
+        emailParts.push(`Content-Type: text/html; charset="UTF-8"`, "");
+        emailParts.push(body.includes("<") ? body : `<p>${body.replace(/\n/g, "<br>")}</p>`);
+        for (const att of params.attachments) {
+          const attPath = join(UPLOADS_DIR, basename(att));
+          if (existsSync(attPath)) {
+            const attData = readFileSync(attPath);
+            const ext = extname(att).toLowerCase();
+            const mimeMap = { ".pdf": "application/pdf", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".csv": "text/csv", ".png": "image/png", ".jpg": "image/jpeg" };
+            const mime = mimeMap[ext] || "application/octet-stream";
+            emailParts.push(`--${boundary}`);
+            emailParts.push(`Content-Type: ${mime}; name="${basename(att)}"`);
+            emailParts.push(`Content-Disposition: attachment; filename="${basename(att)}"`);
+            emailParts.push(`Content-Transfer-Encoding: base64`, "");
+            emailParts.push(attData.toString("base64"));
+          }
+        }
+        emailParts.push(`--${boundary}--`);
+      } else {
+        emailParts.push(`Content-Type: text/html; charset="UTF-8"`, "");
+        emailParts.push(body.includes("<") ? body : `<p>${body.replace(/\n/g, "<br>")}</p>`);
+      }
+
+      const rawEmail = emailParts.join("\r\n");
+      const encodedEmail = Buffer.from(rawEmail).toString("base64url");
+
+      const r = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ raw: encodedEmail })
+      });
+
+      if (!r.ok) {
+        const errText = await r.text();
+        throw new Error(`Gmail API ${r.status}: ${errText.slice(0, 200)}`);
+      }
+
+      const result = await r.json();
+      return { success: true, messageId: result.id, message: `Email sent to ${to}: "${subject}"` };
+    }, { retries: 2, baseDelay: 1000, label: "Gmail send" });
+  }
+
+  // ── Read Email (Gmail API) ──
+  if (tool === "read_email") {
+    const accessToken = await getGoogleAccessToken();
+    if (!accessToken) {
+      return { success: false, error: "Google not connected. Please connect Google in the Connections tab first." };
+    }
+    return await withRetry(async () => {
+      const query = params.query || "";
+      const maxResults = Math.min(params.maxResults || 10, 50);
+
+      const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${maxResults}${query ? `&q=${encodeURIComponent(query)}` : ""}`;
+      const listRes = await fetch(listUrl, {
+        headers: { "Authorization": `Bearer ${accessToken}` }
+      });
+      if (!listRes.ok) {
+        const errText = await listRes.text();
+        throw new Error(`Gmail API ${listRes.status}: ${errText.slice(0, 200)}`);
+      }
+      const listData = await listRes.json();
+      const messages = listData.messages || [];
+
+      const emails = [];
+      for (const msg of messages.slice(0, maxResults)) {
+        try {
+          const msgRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`, {
+            headers: { "Authorization": `Bearer ${accessToken}` }
+          });
+          if (!msgRes.ok) continue;
+          const msgData = await msgRes.json();
+          const headers = msgData.payload?.headers || [];
+          emails.push({
+            id: msg.id,
+            from: headers.find(h => h.name === "From")?.value || "Unknown",
+            subject: headers.find(h => h.name === "Subject")?.value || "(No subject)",
+            date: headers.find(h => h.name === "Date")?.value || "",
+            snippet: msgData.snippet || ""
+          });
+        } catch {}
+      }
+
+      return { success: true, emails, count: emails.length, message: `Found ${emails.length} email(s)${query ? ` matching "${query}"` : ""}` };
+    }, { retries: 2, baseDelay: 1000, label: "Gmail read" });
+  }
+
+  // ── Upload to Google Drive ──
+  if (tool === "upload_to_drive") {
+    const accessToken = await getGoogleAccessToken();
+    if (!accessToken) {
+      return { success: false, error: "Google not connected. Please connect Google in the Connections tab first." };
+    }
+    return await withRetry(async () => {
+      const filename = params.filename;
+      if (!filename) throw new Error("filename is required.");
+      const fpath = join(UPLOADS_DIR, basename(filename));
+      if (!existsSync(fpath)) throw new Error(`File not found: ${filename}. Upload it first or create it with another tool.`);
+
+      const fileSize = statSync(fpath).size;
+      const MAX_SIZE = 50 * 1024 * 1024; // 50MB limit
+      if (fileSize > MAX_SIZE) throw new Error(`File too large (${Math.round(fileSize / 1024 / 1024)}MB). Maximum is 50MB.`);
+
+      const ext = extname(filename).toLowerCase();
+      const mimeMap = { ".pdf": "application/pdf", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".csv": "text/csv", ".png": "image/png", ".jpg": "image/jpeg", ".mp3": "audio/mpeg", ".mp4": "video/mp4", ".html": "text/html", ".md": "text/markdown", ".json": "application/json", ".txt": "text/plain" };
+      const mimeType = mimeMap[ext] || "application/octet-stream";
+
+      // Create file metadata
+      const metadata = { name: basename(filename) };
+      if (params.folderId) metadata.parents = [params.folderId];
+
+      // Multipart upload
+      const boundary = `boundary_${Date.now()}`;
+      const fileData = readFileSync(fpath);
+      const metadataStr = JSON.stringify(metadata);
+
+      const multipartBody = Buffer.concat([
+        Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadataStr}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`),
+        fileData,
+        Buffer.from(`\r\n--${boundary}--`)
+      ]);
+
+      const r = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": `multipart/related; boundary=${boundary}`,
+          "Content-Length": String(multipartBody.length)
+        },
+        body: multipartBody
+      });
+
+      if (!r.ok) {
+        const errText = await r.text();
+        throw new Error(`Google Drive API ${r.status}: ${errText.slice(0, 200)}`);
+      }
+
+      const result = await r.json();
+      return { success: true, fileId: result.id, fileName: result.name, message: `Uploaded "${basename(filename)}" to Google Drive` };
+    }, { retries: 2, baseDelay: 1000, label: "Google Drive upload" });
+  }
+
+  // ── Create Google Doc ──
+  if (tool === "create_google_doc") {
+    const accessToken = await getGoogleAccessToken();
+    if (!accessToken) {
+      return { success: false, error: "Google not connected. Please connect Google in the Connections tab first." };
+    }
+    return await withRetry(async () => {
+      const title = params.title || "Untitled Document";
+      const content = params.content || "";
+
+      // Create the doc
+      const createRes = await fetch("https://docs.googleapis.com/v1/documents", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ title })
+      });
+
+      if (!createRes.ok) {
+        const errText = await createRes.text();
+        throw new Error(`Google Docs API ${createRes.status}: ${errText.slice(0, 200)}`);
+      }
+
+      const doc = await createRes.json();
+      const docId = doc.documentId;
+
+      // Insert content if provided
+      if (content) {
+        const updateRes = await fetch(`https://docs.googleapis.com/v1/documents/${docId}:batchUpdate`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${accessToken}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            requests: [{
+              insertText: {
+                location: { index: 1 },
+                text: content
+              }
+            }]
+          })
+        });
+
+        if (!updateRes.ok) {
+          console.error("[Google Docs] Content insert failed, but doc was created");
+        }
+      }
+
+      return { success: true, docId, title, url: `https://docs.google.com/document/d/${docId}/edit`, message: `Google Doc created: "${title}"` };
+    }, { retries: 2, baseDelay: 1000, label: "Google Docs" });
+  }
+
+  // ── Create Google Sheet ──
+  if (tool === "create_google_sheet") {
+    const accessToken = await getGoogleAccessToken();
+    if (!accessToken) {
+      return { success: false, error: "Google not connected. Please connect Google in the Connections tab first." };
+    }
+    return await withRetry(async () => {
+      const title = params.title || "Untitled Spreadsheet";
+      const sheetsData = params.sheets || [{ name: "Sheet1", headers: ["Column A"], rows: [["Data"]] }];
+
+      // Build sheets config
+      const sheets = sheetsData.map((s, i) => ({
+        properties: { sheetId: i, title: s.name || `Sheet${i + 1}` }
+      }));
+
+      // Create spreadsheet
+      const createRes = await fetch("https://sheets.googleapis.com/v4/spreadsheets", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          properties: { title },
+          sheets
+        })
+      });
+
+      if (!createRes.ok) {
+        const errText = await createRes.text();
+        throw new Error(`Google Sheets API ${createRes.status}: ${errText.slice(0, 200)}`);
+      }
+
+      const spreadsheet = await createRes.json();
+      const spreadsheetId = spreadsheet.spreadsheetId;
+
+      // Add data to each sheet
+      for (const sheetDef of sheetsData) {
+        const sheetName = sheetDef.name || "Sheet1";
+        const allRows = [];
+        if (sheetDef.headers) allRows.push(sheetDef.headers);
+        if (sheetDef.rows) allRows.push(...sheetDef.rows);
+
+        if (allRows.length > 0) {
+          await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(sheetName)}:append?valueInputOption=RAW`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${accessToken}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ values: allRows })
+          });
+        }
+      }
+
+      return { success: true, spreadsheetId, title, url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`, message: `Google Sheet created: "${title}"` };
+    }, { retries: 2, baseDelay: 1000, label: "Google Sheets" });
   }
 
   return { success: false, error: `I don't know that tool: ${tool}. Try asking in a different way.` };
@@ -2434,6 +3230,8 @@ const CONNECTORS = {
   openrouter:       { name: "OpenRouter",      icon: "🧠", color: "#6366f1", description: "LLM gateway — Rex uses this for AI tool calls",       keyBased: true },
   telegram:         { name: "Telegram",        icon: "✈️", color: "#0088cc", description: "MindMappr Bot — chat with Rex via @googlieeyes_bot", keyBased: true },
   discord:          { name: "Discord",         icon: "🎮", color: "#5865F2", description: "MindMappr Bot — all agents accessible via Discord", keyBased: true },
+  google_drive:     { name: "Google Drive",    icon: "📁", color: "#0F9D58", description: "Upload files, create Docs & Sheets",  keyBased: false, oauthUrl: "/api/google/auth" },
+  google:           { name: "Google Workspace",icon: "🔗", color: "#4285F4", description: "Connect Gmail, Drive, Docs, Sheets, Calendar — one login for all Google tools", keyBased: false, oauthUrl: "/api/google/auth" },
 };
 
 // Debug endpoint to check raw DB state
@@ -2450,6 +3248,8 @@ app.get("/api/connections/debug", (req, res) => {
       LLM_API_KEY: !!(process.env.LLM_API_KEY),
       OPENROUTER_API_KEY: !!(process.env.OPENROUTER_API_KEY),
       TELEGRAM_BOT_TOKEN: !!(process.env.TELEGRAM_BOT_TOKEN),
+      GOOGLE_CLIENT_ID: !!(process.env.GOOGLE_CLIENT_ID),
+      GOOGLE_CLIENT_SECRET: !!(process.env.GOOGLE_CLIENT_SECRET),
     };
     res.json({ success: true, rows, envCheck });
   } catch(e) { res.status(500).json({ error: e.message }); }
@@ -2466,7 +3266,8 @@ app.get("/api/connections/list", (_, res) => {
       id, ...info,
       connected: !!(stored[id]?.token),
       connectedAt: stored[id]?.connectedAt || null,
-      accountName: stored[id]?.accountName || null
+      accountName: stored[id]?.accountName || null,
+      oauthUrl: info.oauthUrl || null
     }));
     res.json({ success: true, data: result });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
@@ -2867,7 +3668,15 @@ app.get("/api/tools", (_, res) => {
       params: info.params,
       example: info.example,
     }));
-    res.json({ success: true, data: tools });
+    // Include extra tools (document & Google)
+    const extraTools = Object.entries(EXTRA_TOOLS).map(([name, info]) => ({
+      name,
+      description: info.description,
+      category: info.category,
+      params: info.params,
+      example: info.example,
+    }));
+    res.json({ success: true, data: [...tools, ...extraTools] });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
@@ -2875,6 +3684,14 @@ app.post("/api/tools/execute", async (req, res) => {
   try {
     const { tool, args } = req.body;
     if (!tool) return res.status(400).json({ success: false, error: "tool name required" });
+    // Check if it's an extra tool (handled by server.mjs executeTool)
+    if (EXTRA_TOOLS[tool]) {
+      logActivity("rex", "Rex", "tool_use", `Manual execution: ${tool}`);
+      const params = (args && typeof args === 'object' && !Array.isArray(args)) ? args : {};
+      const result = await executeTool(tool, params);
+      logActivity("rex", "Rex", "tool_result", `${tool}: completed`);
+      return res.json({ success: true, data: result });
+    }
     if (!TOOL_REGISTRY[tool]) return res.status(404).json({ success: false, error: `Unknown tool: ${tool}` });
     logActivity("rex", "Rex", "tool_use", `Manual execution: ${tool}`);
     // args can be an array (positional) or object (named) — normalize to array

@@ -509,6 +509,73 @@ export const TOOL_REGISTRY = {
   },
 };
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Additional execution-tools (handled in server.mjs executeTool) ──────────
+// ── These are listed here so getToolListForPrompt() includes them ────────────
+// ══════════════════════════════════════════════════════════════════════════════
+export const EXTRA_TOOLS = {
+  create_real_pdf: {
+    category: "Document",
+    description: "Create a professionally formatted PDF document with headers, paragraphs, tables, and sections",
+    params: ["title", "content", "sections"],
+    example: 'TOOL:create_real_pdf:{"title":"Report","content":"Hello world"}',
+  },
+  create_spreadsheet: {
+    category: "Document",
+    description: "Create a real .xlsx Excel spreadsheet with formatted headers, auto-width columns, and multiple sheets",
+    params: ["filename", "sheets"],
+    example: 'TOOL:create_spreadsheet:{"filename":"data.xlsx","sheets":[{"name":"Sheet1","headers":["Name","Value"],"rows":[["A","1"]]}]}',
+  },
+  send_email: {
+    category: "Google",
+    description: "Send an email via Gmail (requires Google connection)",
+    params: ["to", "subject", "body", "attachments"],
+    example: 'TOOL:send_email:{"to":"user@example.com","subject":"Hello","body":"Hi there!"}',
+  },
+  read_email: {
+    category: "Google",
+    description: "Read emails from Gmail inbox (requires Google connection)",
+    params: ["query", "maxResults"],
+    example: 'TOOL:read_email:{"query":"is:unread","maxResults":5}',
+  },
+  upload_to_drive: {
+    category: "Google",
+    description: "Upload a file from uploads to Google Drive (requires Google connection)",
+    params: ["filename", "folderId"],
+    example: 'TOOL:upload_to_drive:{"filename":"report.pdf"}',
+  },
+  create_google_doc: {
+    category: "Google",
+    description: "Create a Google Doc with content (requires Google connection)",
+    params: ["title", "content"],
+    example: 'TOOL:create_google_doc:{"title":"Meeting Notes","content":"Notes from today..."}',
+  },
+  create_google_sheet: {
+    category: "Google",
+    description: "Create a Google Sheet with data (requires Google connection)",
+    params: ["title", "sheets"],
+    example: 'TOOL:create_google_sheet:{"title":"Budget","sheets":[{"name":"Q1","headers":["Item","Cost"],"rows":[["Hosting","$50"]]}]}',
+  },
+  fill_pdf: {
+    category: "Document",
+    description: "Fill a PDF form using PDFiller API. Provide document_id + fields to fill, or omit to list available templates.",
+    params: ["document_id", "fields"],
+    example: 'TOOL:fill_pdf:{"document_id":"12345","fields":{"Name":"John Doe","Date":"2026-04-04"}}',
+  },
+  generate_image: {
+    category: "Media",
+    description: "Generate an image using Leonardo AI (or DALL-E fallback). Provide a detailed prompt.",
+    params: ["prompt", "width", "height"],
+    example: 'TOOL:generate_image:{"prompt":"A futuristic city at sunset, cyberpunk style","width":1024,"height":1024}',
+  },
+  create_video: {
+    category: "Media",
+    description: "Create an AI avatar video using HeyGen. Provide script text, optional avatar_id and voice_id.",
+    params: ["script", "title", "avatar_id", "voice_id"],
+    example: 'TOOL:create_video:{"script":"Welcome to MindMappr! Here is your weekly report.","title":"Weekly Report"}',
+  },
+};
+
 /**
  * Execute a tool by name with positional arguments.
  * @param {string} toolName
@@ -559,11 +626,17 @@ export function getToolListForPrompt() {
     if (!categories[info.category]) categories[info.category] = [];
     categories[info.category].push(`  - ${name}(${info.params.join(", ")}): ${info.description}`);
   }
+  // Include extra tools (handled in server.mjs executeTool)
+  for (const [name, info] of Object.entries(EXTRA_TOOLS)) {
+    if (!categories[info.category]) categories[info.category] = [];
+    categories[info.category].push(`  - ${name}(${info.params.join(", ")}): ${info.description}`);
+  }
   let prompt = "\nAVAILABLE TOOLS (use TOOL:name:param1:param2 format on its own line):\n";
   for (const [cat, tools] of Object.entries(categories)) {
     prompt += `\n[${cat}]\n${tools.join("\n")}\n`;
   }
   prompt += `\nEXAMPLES:\nTOOL:github_list_repos\nTOOL:do_list_apps\nTOOL:llm_call:anthropic/claude-sonnet-4:Write a haiku about coding\n`;
-  prompt += `\nRULES FOR TOOL USE:\n1. Put each TOOL: call on its own line\n2. Parameters are colon-separated\n3. You can use multiple tools in one response\n4. After tools execute, you'll get results to summarize for the user\n5. Only use tools when the user's request requires real action (creating, listing, deploying, etc.)\n`;
+  prompt += `\nDOCUMENT, MEDIA & GOOGLE TOOLS (use JSON params):\nTOOL:create_real_pdf:{"title":"Report","content":"Content here","sections":[{"heading":"Section 1","body":"Details"}]}\nTOOL:create_spreadsheet:{"filename":"data.xlsx","sheets":[{"name":"Sheet1","headers":["Name","Value"],"rows":[["A","1"]]}]}\nTOOL:fill_pdf:{"document_id":"12345","fields":{"Name":"John Doe","Date":"2026-04-04"}}\nTOOL:generate_image:{"prompt":"A futuristic city at sunset","width":1024,"height":1024}\nTOOL:create_video:{"script":"Welcome to MindMappr!","title":"Intro Video"}\nTOOL:send_email:{"to":"user@example.com","subject":"Hello","body":"Hi there!"}\nTOOL:read_email:{"query":"is:unread","maxResults":5}\nTOOL:upload_to_drive:{"filename":"report.pdf"}\nTOOL:create_google_doc:{"title":"Meeting Notes","content":"Notes from today..."}\nTOOL:create_google_sheet:{"title":"Budget","sheets":[{"name":"Q1","headers":["Item","Cost"],"rows":[["Hosting","$50"]]}]}\n`;
+  prompt += `\nRULES FOR TOOL USE:\n1. Put each TOOL: call on its own line\n2. Parameters are colon-separated for simple tools, or use JSON for document/Google tools\n3. You can use multiple tools in one response\n4. After tools execute, you'll get results to summarize for the user\n5. Only use tools when the user's request requires real action (creating, listing, deploying, etc.)\n6. For Google tools (send_email, read_email, upload_to_drive, create_google_doc, create_google_sheet), Google must be connected first\n`;
   return prompt;
 }
