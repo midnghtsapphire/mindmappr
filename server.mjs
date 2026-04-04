@@ -2422,7 +2422,7 @@ app.get("/api/connections/list", (_, res) => {
     }
     const result = Object.entries(CONNECTORS).map(([id, info]) => ({
       id, ...info,
-      connected: !!stored[id],
+      connected: !!(stored[id]?.token),
       connectedAt: stored[id]?.connectedAt || null,
       accountName: stored[id]?.accountName || null
     }));
