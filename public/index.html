@@ -2449,7 +2449,8 @@ function renderSkills(skills) {
   grid.innerHTML = skills.map(s => {
     const color = sourceColors[s.source] || '#10b981';
     const tags = (s.tags || []).slice(0, 4).map(t => `<span style="background:rgba(124,58,237,0.15);color:#a78bfa;padding:2px 7px;border-radius:10px;font-size:10px">${t}</span>`).join(' ');
-    return `<div class="card" style="cursor:pointer;border-color:rgba(124,58,237,0.2);transition:border-color .15s" onclick="invokeSkill('${s.id}','${s.name.replace(/'/g,'\\'')}')" onmouseover="this.style.borderColor='${color}'" onmouseout="this.style.borderColor='rgba(124,58,237,0.2)'">
+    const safeName = s.name.replace(/'/g, '&#39;');
+    return `<div class="card" style="cursor:pointer;border-color:rgba(124,58,237,0.2);transition:border-color .15s" onclick="invokeSkill('${s.id}','${safeName}')" onmouseover="this.style.borderColor='${color}'" onmouseout="this.style.borderColor='rgba(124,58,237,0.2)'">>
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px">
         <div style="font-size:14px;font-weight:600;color:var(--text)">${s.name}</div>
         <span style="background:${color}22;color:${color};padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;white-space:nowrap">${s.source}</span>
