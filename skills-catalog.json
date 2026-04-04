@@ -1,0 +1,1269 @@
+[
+  {
+    "id": "advanced_manufacturing",
+    "name": "Expert 3D Printing & Advanced Manufacturing",
+    "description": "Comprehensive 3D printing and advanced manufacturing optimization covering FDM/SLA/SLS/DLP/DMLS, injection molding, CNC integration, generative design, cost estimation, and quality control.",
+    "category": "Engineering & Manufacturing",
+    "tags": [
+      "print-farm-management",
+      "advanced",
+      "topology-optimization",
+      "injection-mold-design",
+      "gcode-generation",
+      "quality-control-protocols",
+      "manufacturing",
+      "print-optimization",
+      "cost-estimation",
+      "mold-flow-simulation"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "affiliate marketing_marketing",
+    "name": "AffiliateMarketing Marketing Expert",
+    "description": "A comprehensive skill for creating, managing, and analyzing AffiliateMarketing marketing campaigns, including Reels, Stories, and Shopping features.",
+    "category": "Marketing & Business",
+    "tags": [
+      "audience-targeting",
+      "trend-analysis",
+      "hashtag-research",
+      "expert",
+      "campaign-management",
+      "content-calendar-generation",
+      "competitor-analysis",
+      "marketing",
+      "affiliate",
+      "ad-creation"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "anti_aging",
+    "name": "Anti-Aging Research & Formulations",
+    "description": "Comprehensive analysis and formulation tools for anti-aging research including telomere biology, NAD+ precursors, senolytics, epigenetic clocks, and clinical trial data mining.",
+    "category": "General",
+    "tags": [
+      "nad-precursor-formulation",
+      "senolytic-compound-analysis",
+      "aging",
+      "epigenetic-clock-calculation",
+      "mitochondrial-support-analysis",
+      "supplement-interaction-check",
+      "peptide-therapy-research",
+      "anti",
+      "telomere-length-analysis",
+      "clinical-trial-search"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "biocomposites_formulation",
+    "name": "Biocomposites & Eco-Materials Formulation Expert",
+    "description": "Novel material formulation engine for basalt fiber composites, taro-based biopolymers, and eco-friendly resin systems with LCA, cost, and compliance analysis.",
+    "category": "General",
+    "tags": [
+      "formulation",
+      "biocomposites"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "business_operations",
+    "name": "Automated Business Operations Suite",
+    "description": "Comprehensive automation suite for running multiple small businesses including review content generation, rental management, gig economy tracking, and team building operations with real tax calculations and business analytics.",
+    "category": "Marketing & Business",
+    "tags": [
+      "social-media-automation",
+      "payment-tracking",
+      "operations",
+      "review-content-generation",
+      "business",
+      "rental-agreement-generation",
+      "affiliate-link-management",
+      "seo-optimization",
+      "rental-inventory-management",
+      "ad-revenue-tracking"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "cardiovascular",
+    "name": "Cardiovascular Disease Research",
+    "description": "Comprehensive cardiovascular disease research module for risk modeling, lipid analysis, biomarker evaluation, therapy recommendations, and lifestyle interventions.",
+    "category": "Medical & Health",
+    "tags": [
+      "cardiac-biomarker-evaluation",
+      "arrhythmia-detection",
+      "statin-alternatives-recommendation",
+      "cardiac-imaging-analysis",
+      "cardiovascular",
+      "lifestyle-intervention-protocols",
+      "emerging-therapies-analysis",
+      "lipid-panel-analysis",
+      "heart-disease-risk-modeling"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "caselaw_expert",
+    "name": "Caselaw Expert",
+    "description": "Advanced legal case law analysis and precedent research skill providing comprehensive citation analysis, jurisdiction-specific rulings, constitutional law interpretation, and landmark case identification capabilities",
+    "category": "Legal & Compliance",
+    "tags": [
+      "precedent-research",
+      "jurisdiction-specific-rulings",
+      "case-law-comparison",
+      "expert",
+      "legal-reasoning-extraction",
+      "landmark-case-identification",
+      "constitutional-law-interpretation",
+      "appellate-analysis",
+      "caselaw",
+      "case-citation-analysis"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "cold_case_analysis",
+    "name": "Cold Case Analysis",
+    "description": "Advanced forensic analysis toolkit for cold case investigations, integrating evidence re-examination, witness re-interview strategies, DNA genealogy matching, digital forensics, timeline reconstruction, and cross-case pattern analysis",
+    "category": "Forensic Investigation",
+    "tags": [
+      "dna-genealogy-matching",
+      "case",
+      "cross-case-pattern-analysis",
+      "lead-generation",
+      "digital-forensics-historical",
+      "cold",
+      "case-priority-scoring",
+      "evidence-reexamination",
+      "analysis",
+      "witness-reinterview-strategy"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "copywriting sales funnels_marketing",
+    "name": "CopywritingSalesFunnels Marketing Expert",
+    "description": "A comprehensive skill for creating, managing, and analyzing CopywritingSalesFunnels marketing campaigns, including Reels, Stories, and Shopping features.",
+    "category": "Marketing & Business",
+    "tags": [
+      "audience-targeting",
+      "trend-analysis",
+      "funnel",
+      "hashtag-research",
+      "expert",
+      "campaign-management",
+      "content-calendar-generation",
+      "copywriting",
+      "competitor-analysis",
+      "sales"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "dna_forensics",
+    "name": "DNA Forensics Scientist",
+    "description": "Advanced DNA forensics analysis module for CODIS database queries, paternity testing, degraded sample analysis, mitochondrial DNA analysis, and genealogical DNA matching for cold cases",
+    "category": "Forensic Investigation",
+    "tags": [
+      "genealogical-dna-matching",
+      "mitochondrial-dna-analysis",
+      "forensics",
+      "codis-database-query",
+      "dna",
+      "str-profile-comparison",
+      "forensic-statistical-calculations",
+      "paternity-maternity-testing",
+      "degraded-sample-analysis",
+      "touch-dna-processing"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "drone_operator",
+    "name": "Drone Operator & Programming",
+    "description": "Advanced UAV flight planning, autonomous mission programming, and drone operation management for legal/forensic applications",
+    "category": "General",
+    "tags": [
+      "obstacle-avoidance",
+      "3d-mapping",
+      "dji-sdk-integration",
+      "drone",
+      "operator",
+      "waypoint-navigation",
+      "mavlink-protocol-handling",
+      "part107-compliance-check",
+      "photogrammetry-processing",
+      "flight-plan-generation"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "ecommerce shopify_marketing",
+    "name": "EcommerceShopify Marketing Expert",
+    "description": "A comprehensive skill for creating, managing, and analyzing EcommerceShopify marketing campaigns, including Reels, Stories, and Shopping features.",
+    "category": "Marketing & Business",
+    "tags": [
+      "audience-targeting",
+      "trend-analysis",
+      "hashtag-research",
+      "expert",
+      "campaign-management",
+      "content-calendar-generation",
+      "competitor-analysis",
+      "ecommerce",
+      "shopify",
+      "ad-creation"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "elite_cybersecurity",
+    "name": "Elite Cybersecurity, Deepfake & Malware Expert",
+    "description": "Top-tier offensive & defensive cybersecurity, malware analysis, deepfake detection, OSINT, and zero-day research toolkit with real tool integrations.",
+    "category": "Security & Privacy",
+    "tags": [
+      "elite",
+      "password-cracking",
+      "privilege-escalation",
+      "cybersecurity",
+      "exploitation",
+      "lateral-movement",
+      "penetration-testing",
+      "wireless-attacks",
+      "vulnerability-scanning",
+      "social-engineering"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "email marketing automation_marketing",
+    "name": "EmailMarketingAutomation Marketing Expert",
+    "description": "A comprehensive skill for creating, managing, and analyzing EmailMarketingAutomation marketing campaigns, including Reels, Stories, and Shopping features.",
+    "category": "Marketing & Business",
+    "tags": [
+      "audience-targeting",
+      "trend-analysis",
+      "hashtag-research",
+      "expert",
+      "campaign-management",
+      "content-calendar-generation",
+      "email",
+      "competitor-analysis",
+      "marketing",
+      "ad-creation"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "email_technology_expert",
+    "name": "Email Technology Expert",
+    "description": "Comprehensive cutting-edge email technology suite including tracing, tracking, auto-answering, auto-notifications, in-app programming for Gmail/Yahoo/Outlook, encryption, forensics, phishing detection, and advanced email automation.",
+    "category": "Development & Coding",
+    "tags": [
+      "delivery-status-tracking",
+      "expert",
+      "spf-dkim-dmarc-validation",
+      "read-receipt-tracking",
+      "email",
+      "arc-authentication-chain",
+      "technology",
+      "link-click-tracking",
+      "email-tracing-ip-geolocation",
+      "email-tracking-pixel-generation"
+    ],
+    "source": "revvel-custom",
+    "version": "2.0.0"
+  },
+  {
+    "id": "eop_innovation_engine",
+    "name": "Autonomous Innovation Engine",
+    "description": "Enables AI agents to autonomously identify operational improvements, workflow optimizations, invention opportunities, and process innovations without explicit prompting, maintaining a persistent innovation log with impact scoring.",
+    "category": "Operations & Innovation",
+    "tags": [
+      "innovation",
+      "automation",
+      "blue-ocean",
+      "optimization",
+      "process-improvement",
+      "invention-discovery",
+      "autonomous",
+      "proactive"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "epstein_files_intel",
+    "name": "Epstein Files Intelligence Analysis & Data Scraper",
+    "description": "Comprehensive investigative tool for Jeffrey Epstein case files with document analysis, relationship mapping, social media intelligence, and fact verification capabilities",
+    "category": "Forensic Investigation",
+    "tags": [
+      "epstein",
+      "redacted text recovery via metadata analysis",
+      "deposition transcript entity extraction",
+      "flight log analysis and passenger mapping",
+      "files",
+      "pacer court record scraping",
+      "intel",
+      "black book contact database extraction",
+      "social network graph building",
+      "court document scraping and ocr"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "expert_witness",
+    "name": "Expert Witness",
+    "description": "Comprehensive expert witness preparation and analysis system for legal proceedings, covering Daubert compliance, report generation, deposition prep, and cross-examination strategies",
+    "category": "Legal & Compliance",
+    "tags": [
+      "testimony-admissibility-assessment",
+      "rebuttal-report-creation",
+      "expert",
+      "expert-qualification-analysis",
+      "cross-examination-strategy",
+      "deposition-preparation",
+      "daubert-compliance-check",
+      "witness",
+      "expert-discovery-compliance",
+      "expert-report-generation"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "forensic_accounting",
+    "name": "Forensic Accounting",
+    "description": "Advanced forensic accounting capabilities for detecting financial fraud, tracing assets, identifying money laundering patterns, analyzing tax fraud, and cryptocurrency transaction tracing with Benford's law analysis.",
+    "category": "Forensic Investigation",
+    "tags": [
+      "money-laundering-pattern-analysis",
+      "risk-scoring",
+      "financial-fraud-detection",
+      "accounting",
+      "cryptocurrency-tracing",
+      "forensic",
+      "asset-tracing",
+      "transaction-flow-mapping",
+      "benfords-law-analysis",
+      "tax-fraud-analysis"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "fullstack_app_developer",
+    "name": "Expert Full-Stack App Developer \u2014 Soup to Nuts",
+    "description": "Complete full-stack application development from zero to production deployment. Covers UI/UX design with glassmorphism and neurodivergent-friendly patterns, React/TypeScript frontend, Express/tRPC backend, PostgreSQL, authentication, payments, mobile apps, testing, deployment, and green engineering ",
+    "category": "General",
+    "tags": [
+      "postgresql-database",
+      "app",
+      "express-trpc-backend",
+      "stripe-payments",
+      "fullstack",
+      "neurodivergent-friendly-ui",
+      "developer",
+      "no-blue-light-mode",
+      "wcag-aaa-accessibility",
+      "react-typescript-frontend"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "glaucoma_ophthalmology",
+    "name": "Glaucoma & Ophthalmology",
+    "description": "Comprehensive glaucoma and ophthalmology analysis module for intraocular pressure management, optic nerve assessment, visual field interpretation, treatment protocols, and emerging therapies",
+    "category": "Medical & Health",
+    "tags": [
+      "optic-nerve-damage-assessment",
+      "neuroprotective-therapy-evaluation",
+      "patient-monitoring-alerts",
+      "treatment-protocol-recommendation",
+      "glaucoma",
+      "intraocular-pressure-analysis",
+      "visual-field-interpretation",
+      "clinical-trial-matching",
+      "ophthalmology",
+      "emerging-therapy-analysis"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "government_gis",
+    "name": "Government Topography & GIS Resources",
+    "description": "Comprehensive access to US government topography, GIS, and geospatial datasets including USGS National Map, NOAA coastal data, FEMA flood maps, Census TIGER data, BLM land records, and related resources",
+    "category": "Government & Public Service",
+    "tags": [
+      "search-national-wetlands-inventory",
+      "fetch-noaa-coastal-data",
+      "access-nrcs-soil-surveys",
+      "retrieve-historical-aerial-photography",
+      "access-census-tiger-data",
+      "gis",
+      "government",
+      "query-usgs-national-map",
+      "retrieve-fema-flood-maps",
+      "query-blm-land-records"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "government_resources",
+    "name": "Presidential/Government Resources",
+    "description": "Comprehensive access to U.S. federal government data sources including executive orders, federal register, congressional records, FOIA requests, grants, court records, census data, and federal budget analysis",
+    "category": "Legal & Compliance",
+    "tags": [
+      "census-data-analysis",
+      "federal-budget-analysis",
+      "federal-register-analysis",
+      "resources",
+      "foia-request-automation",
+      "pacer-court-records",
+      "grants-gov-research",
+      "congressional-records-query",
+      "government",
+      "executive-orders-search"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "gpr_body_detection",
+    "name": "Ground-Penetrating Radar / Microwave Body Detection System",
+    "description": "Advanced forensic GPR system for detecting human remains in concrete and underground environments. Provides signal processing, dielectric contrast analysis, frequency optimization, 2D/3D visualization, and comprehensive forensic reporting.",
+    "category": "General",
+    "tags": [
+      "anomaly classification (body vs rebar vs void vs pipe)",
+      "frequency optimization (200mhz-2ghz)",
+      "forensic report generation",
+      "gpr",
+      "dielectric contrast analysis",
+      "depth estimation algorithms",
+      "detection",
+      "gpr signal processing and filtering",
+      "body",
+      "2d/3d visualization and rendering"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "hawaiian_genealogy",
+    "name": "Hawaiian History & Genealogy Expert",
+    "description": "Deep Hawaiian cultural and genealogical knowledge spanning Kingdom history, Ali'i genealogy, land records, language resources, and Polynesian migration patterns",
+    "category": "Intelligence & Research",
+    "tags": [
+      "ali'i genealogy lineage tracking",
+      "plantation era immigration record search",
+      "newspaper archive search",
+      "hawaiian",
+      "polynesian dna haplogroup analysis",
+      "mahele land record analysis",
+      "hawaiian language translation and parsing",
+      "church record extraction",
+      "blood quantum calculation",
+      "genealogy"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "historical_research",
+    "name": "Historical Research & Archives",
+    "description": "Comprehensive historical research and archival analysis module providing access to National Archives, Library of Congress collections, historical newspapers, genealogy records, military service records, immigration data, land patents, census records, and Sanborn maps",
+    "category": "Intelligence & Research",
+    "tags": [
+      "access-library-of-congress",
+      "access-land-patent-records",
+      "search-military-service-records",
+      "retrieve-genealogy-records",
+      "historical",
+      "research",
+      "query-chronicling-america",
+      "retrieve-census-data",
+      "search-national-archives",
+      "query-immigration-records"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "influencer marketing_marketing",
+    "name": "InfluencerMarketing Marketing Expert",
+    "description": "A comprehensive skill for creating, managing, and analyzing InfluencerMarketing marketing campaigns, including Reels, Stories, and Shopping features.",
+    "category": "Marketing & Business",
+    "tags": [
+      "audience-targeting",
+      "trend-analysis",
+      "hashtag-research",
+      "expert",
+      "campaign-management",
+      "content-calendar-generation",
+      "competitor-analysis",
+      "marketing",
+      "ad-creation",
+      "analytics-and-reporting"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "instagram_marketing",
+    "name": "Instagram Marketing Expert",
+    "description": "A comprehensive skill for creating, managing, and analyzing Instagram marketing campaigns, including Reels, Stories, and Shopping features.",
+    "category": "Marketing & Business",
+    "tags": [
+      "audience-targeting",
+      "trend-analysis",
+      "hashtag-research",
+      "campaign-management",
+      "content-calendar-generation",
+      "instagram",
+      "competitor-analysis",
+      "marketing",
+      "ad-creation",
+      "analytics-and-reporting"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "legal_brief_writing",
+    "name": "Legal Brief Writing",
+    "description": "Advanced legal brief writing skill for drafting motions, appellate briefs, memoranda, and legal arguments with Bluebook citation formatting and persuasive writing techniques",
+    "category": "Legal & Compliance",
+    "tags": [
+      "motion-drafting",
+      "appellate-brief-construction",
+      "citation-formatting-bluebook",
+      "issue-spotting-and-framing",
+      "writing",
+      "statement-of-facts-drafting",
+      "legal-argument-construction",
+      "memorandum-of-law-drafting",
+      "persuasive-writing-enhancement",
+      "legal"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "lexisnexis_integration",
+    "name": "LexisNexis Integration",
+    "description": "Production-grade integration for LexisNexis legal research platform providing automated case law queries, Shepard's citation validation, statutory research, regulatory compliance monitoring, and legal analytics capabilities",
+    "category": "Legal & Compliance",
+    "tags": [
+      "case-law-search",
+      "lexisnexis",
+      "integration",
+      "regulatory-compliance-check",
+      "citation-validation",
+      "legal-analytics",
+      "statutory-research",
+      "shepard-citation-analysis",
+      "legal-document-retrieval",
+      "docket-tracking"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "lidar_expert",
+    "name": "LiDAR Expert",
+    "description": "Comprehensive LiDAR processing and analysis skill for point cloud data, terrain modeling, building extraction, vegetation analysis, and flood modeling using USGS 3DEP and OpenTopography datasets",
+    "category": "General",
+    "tags": [
+      "lidar",
+      "dem-dsm-generation",
+      "building-extraction",
+      "point-cloud-processing",
+      "expert",
+      "flood-modeling",
+      "las-laz-processing",
+      "terrain-modeling",
+      "vegetation-analysis",
+      "lidar-classification"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "linkedin_marketing",
+    "name": "Linkedin Marketing Expert",
+    "description": "A comprehensive skill for creating, managing, and analyzing Linkedin marketing campaigns, including Reels, Stories, and Shopping features.",
+    "category": "Marketing & Business",
+    "tags": [
+      "audience-targeting",
+      "trend-analysis",
+      "hashtag-research",
+      "campaign-management",
+      "content-calendar-generation",
+      "competitor-analysis",
+      "marketing",
+      "linkedin",
+      "ad-creation",
+      "analytics-and-reporting"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "marketing_intelligence_report",
+    "name": "Marketing Intelligence Report Generator",
+    "description": "Generates daily structured Marketing Intelligence Reports for Tech and Politics trends by fetching live data from Google Trends RSS, Wikimedia Pageview API, and Hacker News Firebase API. Classifies items by category, scores signal strength via cross-source convergence analysis, and inserts the repor",
+    "category": "Marketing & Intelligence",
+    "tags": [
+      "marketing",
+      "intelligence",
+      "trends",
+      "osint",
+      "automation",
+      "reporting",
+      "google-trends",
+      "wikipedia",
+      "hacker-news",
+      "database"
+    ],
+    "source": "revvel-custom",
+    "version": "1.1.0"
+  },
+  {
+    "id": "mechanical_engineering",
+    "name": "Mechanical Engineering & Materials Science Expert",
+    "description": "Comprehensive mechanical engineering and materials science analysis covering material properties, stress/strain analysis, fatigue prediction, composite design, FEA integration, manufacturing processes, and standards compliance",
+    "category": "Engineering & Manufacturing",
+    "tags": [
+      "fatigue-life-prediction",
+      "material-properties-lookup",
+      "fea-integration",
+      "material-selection-ashby",
+      "metallurgy-analysis",
+      "mechanical",
+      "engineering",
+      "stress-strain-analysis",
+      "composite-materials-design",
+      "corrosion-analysis"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "medical_doctor",
+    "name": "Medical Doctor / Physician Expert",
+    "description": "Comprehensive medical diagnostic reasoning engine with differential diagnosis generation, ICD/CPT coding, drug interaction checking, lab interpretation, radiology/pathology analysis, clinical guidelines, and evidence-based medicine search capabilities.",
+    "category": "Medical & Health",
+    "tags": [
+      "differential-diagnosis",
+      "radiology-report-interpretation",
+      "medical-record-review",
+      "cpt-code-analysis",
+      "icd-code-lookup",
+      "medical",
+      "pathology-report-analysis",
+      "doctor",
+      "lab-result-interpretation",
+      "drug-interaction-check"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "medical_expert_witness",
+    "name": "Medical Expert Witness",
+    "description": "Comprehensive medical expert witness analysis and report generation for legal proceedings, covering Daubert/Frye compliance, malpractice evaluation, causation analysis, and expert testimony preparation.",
+    "category": "Legal & Compliance",
+    "tags": [
+      "life-care-plan-creation",
+      "causation-analysis",
+      "standard-of-care-analysis",
+      "damages-assessment",
+      "expert",
+      "medical",
+      "deposition-preparation",
+      "witness",
+      "malpractice-case-evaluation",
+      "daubert-frye-compliance-check"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "meta_facebook_marketing",
+    "name": "Meta/Facebook Marketing Expert",
+    "description": "A comprehensive skill for Meta/Facebook marketing, including ad creation, campaign management, analytics, and platform-specific features.",
+    "category": "Marketing & Business",
+    "tags": [
+      "audience-targeting",
+      "trend-analysis",
+      "meta",
+      "campaign-management",
+      "content-calendar-generation",
+      "competitor-analysis",
+      "marketing",
+      "hashtag-and-keyword-research",
+      "ad-creation",
+      "analytics-and-reporting"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "nanotech_surgery",
+    "name": "Nanotech Surgery & Skin Repair Expert",
+    "description": "Expert system for nanotechnology applications in surgery and skin repair, covering nanoparticle drug delivery, nano-surgical tools, skin regeneration, tattoo removal, scar revision, anti-aging, burns treatment, clinical trials, safety assessment, formulation calculations, research tracking, patents,",
+    "category": "Medical & Health",
+    "tags": [
+      "nanotech",
+      "nanoparticle-drug-delivery-analysis",
+      "burns-treatment-nanotech-protocols",
+      "skin-repair-regeneration-protocols",
+      "clinical-trial-database-query",
+      "nano-surgical-tools-evaluation",
+      "tattoo-removal-nanotech-planning",
+      "surgery",
+      "anti-aging-nanotech-recommendations",
+      "scar-revision-nanotech-assessment"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "neurodegenerative",
+    "name": "Neurodegenerative Disease Formulations",
+    "description": "Comprehensive analysis and formulation support for neurodegenerative diseases including Parkinson's and Alzheimer's research, clinical trial matching, biomarker tracking, and treatment optimization",
+    "category": "Intelligence & Research",
+    "tags": [
+      "research-data-parsing",
+      "biomarker-analysis",
+      "neuroprotective-compound-analysis",
+      "drug-interaction-analysis",
+      "clinical-trial-matching",
+      "neurodegenerative",
+      "disease-progression-modeling",
+      "lifestyle-intervention-protocols",
+      "treatment-formulation"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "oz_blue-ocean-app-discovery",
+    "name": "Blue Ocean App Discovery Prompt",
+    "description": "Prompt from OZ Prompt Library: Blue Ocean App Discovery Prompt",
+    "category": "App Development",
+    "tags": [
+      "prompt",
+      "oz-library",
+      "app-development"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "patent_ip",
+    "name": "Patent & IP",
+    "description": "Comprehensive patent and intellectual property analysis toolkit for search, prior art analysis, claim drafting, trademark search, copyright registration, and IP portfolio management",
+    "category": "Legal & Compliance",
+    "tags": [
+      "trademark-search",
+      "ip-portfolio-management",
+      "patent-claim-drafting",
+      "prior-art-analysis",
+      "copyright-registration",
+      "patent-analytics",
+      "legal-status-tracking",
+      "patent",
+      "patent-search"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "pinterest_marketing",
+    "name": "Pinterest Marketing Expert",
+    "description": "Complete Pinterest marketing automation suite for ad creation, campaign management, content planning, trend analysis, competitor research, influencer discovery, and ROI tracking",
+    "category": "Marketing & Business",
+    "tags": [
+      "manage-campaigns",
+      "audit-competitors",
+      "find-influencers",
+      "build-content-calendar",
+      "create-pinterest-ads",
+      "pinterest",
+      "marketing",
+      "target-audiences",
+      "analyze-trends",
+      "track-roi"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "podcast marketing_marketing",
+    "name": "PodcastMarketing Marketing Expert",
+    "description": "A comprehensive skill for creating, managing, and analyzing PodcastMarketing marketing campaigns, including Reels, Stories, and Shopping features.",
+    "category": "Marketing & Business",
+    "tags": [
+      "audience-targeting",
+      "trend-analysis",
+      "podcast",
+      "hashtag-research",
+      "expert",
+      "campaign-management",
+      "content-calendar-generation",
+      "competitor-analysis",
+      "marketing",
+      "ad-creation"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "portuguese_maori_genealogy",
+    "name": "Portuguese & Maori/New Zealand Genealogy Expert",
+    "description": "Expert system for Portuguese and Maori/New Zealand genealogical research, covering civil records, whakapapa traditions, DNA markers, and migration patterns",
+    "category": "Intelligence & Research",
+    "tags": [
+      "parse-portuguese-civil-records",
+      "validate-maori-land-court-records",
+      "search-historical-archives",
+      "portuguese",
+      "genealogy",
+      "trace-portuguese-emigration",
+      "maori",
+      "validate-genealogical-data",
+      "generate-dna-haplogroup-report",
+      "analyze-maori-whakapapa"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "precog_analysis",
+    "name": "Precognitive Analysis Tool (PRECOG)",
+    "description": "Advanced predictive intelligence platform for crime pattern prediction, behavioral analysis, financial anomaly detection, health outcome forecasting, and legal outcome modeling with cross-domain correlation capabilities.",
+    "category": "Intelligence & Research",
+    "tags": [
+      "financial-anomaly-detection",
+      "cross-domain-correlation",
+      "behavioral-pattern-analysis",
+      "legal-outcome-modeling",
+      "health-outcome-prediction",
+      "crime-pattern-prediction",
+      "analysis",
+      "temporal-pattern-detection",
+      "network-analysis",
+      "precog"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "revvel_soul_file",
+    "name": "Revvel Agent Soul File (EOP)",
+    "description": "Core agent personality, knowledge base, and operational parameters for Revvel AI. Contains comprehensive context about the operator, projects, and behavioral guidelines.",
+    "category": "AI & Machine Learning",
+    "tags": [
+      "soul-file",
+      "agent-personality",
+      "system-prompt",
+      "revvel",
+      "core"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "satellite_remote_sensing",
+    "name": "Satellite & Remote Sensing",
+    "description": "Advanced satellite imagery analysis and remote sensing capabilities including Sentinel/Landsat data access, multispectral analysis, change detection, vegetation indices, urban monitoring, and disaster assessment",
+    "category": "General",
+    "tags": [
+      "remote",
+      "urban-growth-monitoring",
+      "landsat-data-access",
+      "sentinel-data-access",
+      "ndvi-calculation",
+      "vegetation-health-analysis",
+      "sensing",
+      "multispectral-analysis",
+      "satellite",
+      "disaster-assessment"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "seo content marketing_marketing",
+    "name": "SEOContentMarketing Marketing Expert",
+    "description": "A comprehensive skill for creating, managing, and analyzing SEOContentMarketing marketing campaigns, including Reels, Stories, and Shopping features.",
+    "category": "Marketing & Business",
+    "tags": [
+      "audience-targeting",
+      "trend-analysis",
+      "hashtag-research",
+      "expert",
+      "campaign-management",
+      "content-calendar-generation",
+      "seo",
+      "competitor-analysis",
+      "marketing",
+      "ad-creation"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "shift_testing",
+    "name": "S.H.I.F.T. \u2014 AI Agent Behavioral Testing Framework",
+    "description": "The S.H.I.F.T. (Self-Healing Intent-Focused Tasks) framework for testing autonomous AI agents. Provides the Wizard of Oz prompt engineering method, the Self-Healing Evaluator scoring pattern, and the 5 Dimensions of Agent Quality. Use when building, testing, or debugging any AI agent.\n",
+    "category": "AI Testing & Quality",
+    "tags": [
+      "agent-testing",
+      "behavioral-validation",
+      "wizard-of-oz",
+      "self-healing",
+      "evaluator-pattern",
+      "prompt-engineering",
+      "shift",
+      "ai-quality",
+      "osint",
+      "growlingeyes"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "stealth_inventory",
+    "name": "Stealth Inventory Tracker & Amazon/Vine Silent Scraper",
+    "description": "Production-grade stealth inventory management and Amazon/Vine intelligence platform with silent scraping capabilities",
+    "category": "Intelligence & Research",
+    "tags": [
+      "barcode-qr-integration",
+      "stealth",
+      "order-tracking",
+      "cost-tracking",
+      "multi-marketplace-support",
+      "inventory-level-monitoring",
+      "inventory",
+      "return-management",
+      "shipping-carrier-integration",
+      "product-catalog-management"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "stealth_lead_gen",
+    "name": "Stealth Lead Generator \u2014 Insurance & Life Events",
+    "description": "Advanced stealth scraping and lead generation for insurance life events including death, marriage, birth, property, business, retirement, and health-related triggers with full campaign management and compliance tracking",
+    "category": "General",
+    "tags": [
+      "obituary-aggregation",
+      "campaign-automation",
+      "stealth",
+      "marriage-registry-scraping",
+      "property-transfer-scraping",
+      "lead",
+      "birth-registry-scraping",
+      "court-record-scraping",
+      "gen",
+      "death-registry-scraping"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "tax_automation",
+    "name": "Expert Tax Automation & Multi-Business Strategist",
+    "description": "Comprehensive tax automation and multi-business optimization system for federal and state taxes, entity structure analysis, and strategic tax planning",
+    "category": "Marketing & Business",
+    "tags": [
+      "auto-filing preparation (form 1040, schedule c, schedule e, schedule se, form 8829, form 4562, form 1099 reconciliation)",
+      "federal and state tax calculation for all 50 states",
+      "historical tax year analysis for amended returns",
+      "credit and deduction optimization (eitc, child tax credit, saver's credit, education credits, ev credits, energy efficiency credits, home office, self-employment deductions)",
+      "quarterly estimated tax calculator (form 1040-es)",
+      "1099 income tracking and reconciliation",
+      "tax",
+      "automation",
+      "self-employment tax optimization",
+      "passive vs active income classification engine"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "tiktok_marketing",
+    "name": "TikTok Marketing Expert",
+    "description": "Complete TikTok marketing automation suite for ad creation, campaign management, content planning, trend analysis, competitor research, influencer discovery, and ROI tracking",
+    "category": "Marketing & Business",
+    "tags": [
+      "manage-campaigns",
+      "create-tiktok-ads",
+      "audit-competitors",
+      "find-influencers",
+      "build-content-calendar",
+      "tiktok",
+      "marketing",
+      "target-audiences",
+      "analyze-trends",
+      "track-roi"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "trafficking_intel",
+    "name": "Human Trafficking Intelligence & Dark Web Tracker",
+    "description": "Comprehensive investigative tool for tracking human trafficking operations, offenders, and victims across surface web, dark web, and offline sources. Provides real-time intelligence gathering, statistical modeling for true trafficking counts, offender identification, victim location tools, and evide",
+    "category": "Intelligence & Research",
+    "tags": [
+      "geographic hotspot mapping",
+      "evidence package generation",
+      "network analysis of criminal organizations",
+      "intel",
+      "offender registry scraping (all 50 states + territories)",
+      "statistical modeling for true trafficking estimates",
+      "real-time dark web monitoring (.onion sites)",
+      "victim identification via missing persons cross-reference",
+      "trafficking",
+      "cryptocurrency transaction tracing (bitcoin, monero)"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "transplant_surgery",
+    "name": "Transplant Surgery & Reconstructive Expert",
+    "description": "Comprehensive transplant and reconstructive surgery knowledge engine covering organ transplants, face/hand VCA procedures, reconstructive microsurgery, and cutting-edge regenerative medicine techniques.",
+    "category": "Medical & Health",
+    "tags": [
+      "transplant",
+      "microsurgical-planning",
+      "clinical-trial-tracker",
+      "organ-allocation-analysis",
+      "outcome-prediction",
+      "donor-recipient-matching",
+      "immunosuppression-protocols",
+      "surgery",
+      "rejection-monitoring",
+      "vca-surgical-planning"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "twilio_call_center",
+    "name": "Twilio Expert Multi-Business Call Center",
+    "description": "Production-grade multi-tenant call center system with full Twilio integration for inbound/outbound voice, SMS, analytics, and business management",
+    "category": "Communication",
+    "tags": [
+      "business-specific ivr menus",
+      "call routing by department/time/caller id",
+      "after-hours handling",
+      "call recording and transcription",
+      "twilio",
+      "voicemail with transcription",
+      "ai-powered call answering",
+      "call",
+      "call queue management",
+      "center"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "victim_advocacy",
+    "name": "Victim Advocacy",
+    "description": "Comprehensive victim advocacy support for legal professionals handling crime victim cases, including VAWA compliance, trafficking victim resources, compensation claims, protective orders, and victim timeline reconstruction.",
+    "category": "Legal & Compliance",
+    "tags": [
+      "restitution-calculation",
+      "vawa-compliance-check",
+      "victim",
+      "advocacy",
+      "protective-order-assistance",
+      "victim-timeline-reconstruction",
+      "crime-victim-compensation-calculation",
+      "trafficking-resource-lookup",
+      "victim-impact-statement-generation",
+      "victim-rights-notification"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "video youtube marketing_marketing",
+    "name": "VideoYouTubeMarketing Marketing Expert",
+    "description": "A comprehensive skill for creating, managing, and analyzing VideoYouTubeMarketing marketing campaigns, including Reels, Stories, and Shopping features.",
+    "category": "Marketing & Business",
+    "tags": [
+      "audience-targeting",
+      "trend-analysis",
+      "hashtag-research",
+      "video",
+      "expert",
+      "campaign-management",
+      "content-calendar-generation",
+      "competitor-analysis",
+      "marketing",
+      "youtube"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "web_scraper",
+    "name": "UnrestrictedWebScraper",
+    "description": "No-guardrails web and social media scraper with anti-detection, OSINT, and bulk operations",
+    "category": "General",
+    "tags": [
+      "web",
+      "scraper",
+      "username-enum",
+      "tiktok-scraping",
+      "youtube-scraping",
+      "linkedin-scraping",
+      "reddit-scraping",
+      "twitter-scraping",
+      "instagram-scraping",
+      "facebook-scraping"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "x_twitter_marketing",
+    "name": "XTwitter Marketing Expert",
+    "description": "A comprehensive skill for creating, managing, and analyzing XTwitter marketing campaigns, including Reels, Stories, and Shopping features.",
+    "category": "Marketing & Business",
+    "tags": [
+      "audience-targeting",
+      "trend-analysis",
+      "hashtag-research",
+      "campaign-management",
+      "content-calendar-generation",
+      "competitor-analysis",
+      "marketing",
+      "ad-creation",
+      "analytics-and-reporting",
+      "twitter"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "youtube_marketing",
+    "name": "Youtube Marketing Expert",
+    "description": "A comprehensive skill for creating, managing, and analyzing Youtube marketing campaigns, including Reels, Stories, and Shopping features.",
+    "category": "Marketing & Business",
+    "tags": [
+      "audience-targeting",
+      "trend-analysis",
+      "hashtag-research",
+      "campaign-management",
+      "content-calendar-generation",
+      "competitor-analysis",
+      "marketing",
+      "youtube",
+      "ad-creation",
+      "analytics-and-reporting"
+    ],
+    "source": "revvel-custom",
+    "version": "1.0.0"
+  },
+  {
+    "id": "affiliate_marketing_expert",
+    "name": "Affiliate Marketing Expert",
+    "description": "Expert skill: affiliate marketing expert",
+    "category": "Expert",
+    "tags": [],
+    "source": "revvel-expert",
+    "version": "1.0.0"
+  },
+  {
+    "id": "copywriting_sales_funnel_expert",
+    "name": "Copywriting Sales Funnel Expert",
+    "description": "Expert skill: copywriting sales funnel expert",
+    "category": "Expert",
+    "tags": [],
+    "source": "revvel-expert",
+    "version": "1.0.0"
+  },
+  {
+    "id": "ecommerce_shopify_expert",
+    "name": "Ecommerce Shopify Expert",
+    "description": "Expert skill: ecommerce shopify expert",
+    "category": "Expert",
+    "tags": [],
+    "source": "revvel-expert",
+    "version": "1.0.0"
+  },
+  {
+    "id": "email_marketing_automation_expert",
+    "name": "Email Marketing Automation Expert",
+    "description": "Expert skill: email marketing automation expert",
+    "category": "Expert",
+    "tags": [],
+    "source": "revvel-expert",
+    "version": "1.0.0"
+  },
+  {
+    "id": "influencer_marketing_expert",
+    "name": "Influencer Marketing Expert",
+    "description": "Expert skill: influencer marketing expert",
+    "category": "Expert",
+    "tags": [],
+    "source": "revvel-expert",
+    "version": "1.0.0"
+  },
+  {
+    "id": "podcast_marketing_expert",
+    "name": "Podcast Marketing Expert",
+    "description": "Expert skill: podcast marketing expert",
+    "category": "Expert",
+    "tags": [],
+    "source": "revvel-expert",
+    "version": "1.0.0"
+  },
+  {
+    "id": "seo_content_marketing_expert",
+    "name": "Seo Content Marketing Expert",
+    "description": "Expert skill: seo content marketing expert",
+    "category": "Expert",
+    "tags": [],
+    "source": "revvel-expert",
+    "version": "1.0.0"
+  },
+  {
+    "id": "video_youtube_marketing_expert",
+    "name": "Video Youtube Marketing Expert",
+    "description": "Expert skill: video youtube marketing expert",
+    "category": "Expert",
+    "tags": [],
+    "source": "revvel-expert",
+    "version": "1.0.0"
+  }
+]

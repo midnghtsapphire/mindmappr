@@ -212,6 +212,45 @@ db.exec(`
   );
 `);
 
+// ── Skills Table ────────────────────────────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS skills (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    category TEXT DEFAULT 'General',
+    tags TEXT DEFAULT '[]',
+    source TEXT DEFAULT 'revvel-custom',
+    version TEXT DEFAULT '1.0.0',
+    enabled INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+`);
+
+// Seed skills from catalog JSON on startup
+try {
+  const skillsCount = db.prepare("SELECT COUNT(*) as c FROM skills").get();
+  if (skillsCount.c === 0) {
+    const catalogPath = join(__dirname, 'skills-catalog.json');
+    if (existsSync(catalogPath)) {
+      const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
+      const insertSkill = db.prepare(
+        "INSERT OR IGNORE INTO skills (id, name, description, category, tags, source, version) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      );
+      const seedSkills = db.transaction((skills) => {
+        for (const s of skills) {
+          insertSkill.run(
+            s.id, s.name, s.description || '', s.category || 'General',
+            JSON.stringify(s.tags || []), s.source || 'revvel-custom', s.version || '1.0.0'
+          );
+        }
+      });
+      seedSkills(catalog);
+      console.log(`[Skills] Seeded ${catalog.length} skills from catalog`);
+    }
+  }
+} catch (e) { console.error('[Skills] Seed error:', e.message); }
+
 // Seed known facts about the owner
 const existingFacts = db.prepare("SELECT COUNT(*) as c FROM facts WHERE category = 'owner'").get();
 if (existingFacts.c === 0) {
@@ -544,6 +583,24 @@ RULES:
 5. Structure content with clear headings and sections
 6. When creating marketing copy, be engaging and authentic
 
+Owner: Audrey Evans (Freedom Angel Corps)
+Current date: ${new Date().toISOString().split('T')[0]}`,
+  },
+  telegram: {
+    name: "MindMappr Bot",
+    model: "anthropic/claude-sonnet-4",
+    role: "Telegram bridge — @googlieeyes_bot in RISINGALOHA group",
+    description: "MindMappr Bot (@googlieeyes_bot) is the Telegram bridge for the RISINGALOHA group. It receives messages from Telegram, routes them through the agent system, and sends responses back. Chat here to preview how the bot responds.",
+    icon: "✈️",
+    color: "#0088cc",
+    systemPrompt: `You are MindMappr Bot, the Telegram interface for the MindMappr AI system.
+You are connected to the @googlieeyes_bot Telegram bot in the RISINGALOHA group.
+Your job: Relay messages between Telegram users and the MindMappr agent system.
+When users chat with you here, respond as the bot would in Telegram.
+You have access to all MindMappr capabilities: research, code review, task management, content creation.
+Be conversational, helpful, and concise — Telegram users expect short, clear responses.
+Group: RISINGALOHA (chat ID: -1003735305867)
+Bot username: @googlieeyes_bot
 Owner: Audrey Evans (Freedom Angel Corps)
 Current date: ${new Date().toISOString().split('T')[0]}`,
   },
@@ -1836,16 +1893,41 @@ app.get("/api/health", (_, res) => {
 // ── v6: Agent API Endpoints ─────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 
-// Get Rex skills registry
+// ── Skills API ────────────────────────────────────────────────────────────
+// List all skills (with optional search/filter)
+app.get("/api/skills", (req, res) => {
+  try {
+    const { q, category, source, limit = 200, offset = 0 } = req.query;
+    let sql = "SELECT * FROM skills WHERE enabled = 1";
+    const params = [];
+    if (q) { sql += " AND (name LIKE ? OR description LIKE ? OR tags LIKE ?)"; params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
+    if (category) { sql += " AND category = ?"; params.push(category); }
+    if (source) { sql += " AND source = ?"; params.push(source); }
+    sql += " ORDER BY name ASC LIMIT ? OFFSET ?";
+    params.push(parseInt(limit), parseInt(offset));
+    const skills = db.prepare(sql).all(...params);
+    const total = db.prepare("SELECT COUNT(*) as c FROM skills WHERE enabled = 1").get().c;
+    const categories = db.prepare("SELECT DISTINCT category FROM skills WHERE enabled = 1 ORDER BY category").all().map(r => r.category);
+    res.json({ success: true, data: skills.map(s => ({ ...s, tags: JSON.parse(s.tags || '[]') })), total, categories });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+// Get a single skill
+app.get("/api/skills/:id", (req, res) => {
+  try {
+    const skill = db.prepare("SELECT * FROM skills WHERE id = ?").get(req.params.id);
+    if (!skill) return res.status(404).json({ success: false, error: "Skill not found" });
+    res.json({ success: true, data: { ...skill, tags: JSON.parse(skill.tags || '[]') } });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+// Legacy rex/skills endpoint (now uses DB)
 app.get("/api/agents/rex/skills", (req, res) => {
   try {
-    const skillsPath = path.join(process.cwd(), "..", "openaudrey", "core", "skills", "rex-skills-registry.json");
-    if (fs.existsSync(skillsPath)) {
-      const skills = JSON.parse(fs.readFileSync(skillsPath, "utf8"));
-      res.json({ success: true, data: skills });
-    } else {
-      res.status(404).json({ success: false, error: "Skills registry not found" });
-    }
+    const skills = db.prepare("SELECT * FROM skills WHERE enabled = 1 ORDER BY name ASC").all();
+    res.json({ success: true, data: skills.map(s => ({ ...s, tags: JSON.parse(s.tags || '[]') })) });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
   }

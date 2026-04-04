@@ -361,6 +361,7 @@
   <div class="tab" data-tab="activity">Activity</div>
   <div class="tab" data-tab="studio">Content Studio</div>
   <div class="tab" data-tab="deploy">Deploy</div>
+  <div class="tab" data-tab="skills">Skills Vault</div>
 </div>
 
 <div class="main">
@@ -887,6 +888,22 @@
     </div>
   </div>
 
+  <!-- ── SKILLS VAULT ── -->
+  <div class="panel" id="panel-skills">
+    <div class="panel-inner">
+      <div class="panel-title">Skills Vault</div>
+      <div class="panel-sub">Expert skills from Revvel — click any skill to invoke it with Rex</div>
+      <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
+        <input type="text" id="skillSearch" class="form-input" placeholder="Search skills..." oninput="filterSkills()" style="flex:1;min-width:200px;max-width:360px" />
+        <select id="skillCategoryFilter" class="form-input form-select" onchange="filterSkills()" style="max-width:220px">
+          <option value="">All Categories</option>
+        </select>
+        <span id="skillCount" style="font-size:12px;color:var(--text2)"></span>
+      </div>
+      <div id="skillsGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px"></div>
+    </div>
+  </div>
+
 </div>
 
 <div id="toast"></div>
@@ -934,6 +951,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (tab.dataset.tab === 'activity') { loadActivityLive(); loadActivityFeed(); }
     if (tab.dataset.tab === 'studio') { loadStudioStats(); loadStudioHistory(); }
     if (tab.dataset.tab === 'deploy') loadPRs();
+    if (tab.dataset.tab === 'skills') loadSkills();
   });
 });
 
@@ -2382,6 +2400,79 @@ setInterval(() => {
     loadActivityFeed();
   }
 }, 30000);
+
+// ── Skills Vault ───────────────────────────────────────────────────────────────────
+let allSkills = [];
+async function loadSkills() {
+  const grid = document.getElementById('skillsGrid');
+  const countEl = document.getElementById('skillCount');
+  const catFilter = document.getElementById('skillCategoryFilter');
+  grid.innerHTML = '<div style="color:var(--text2);font-size:13px">Loading skills...</div>';
+  try {
+    const r = await fetch(`${APIBASE}/skills?limit=500`);
+    const d = await r.json();
+    if (!d.success) throw new Error(d.error);
+    allSkills = d.data || [];
+    // Populate category filter
+    const existing = Array.from(catFilter.options).map(o => o.value);
+    (d.categories || []).forEach(cat => {
+      if (!existing.includes(cat)) {
+        const opt = document.createElement('option');
+        opt.value = cat; opt.textContent = cat;
+        catFilter.appendChild(opt);
+      }
+    });
+    renderSkills(allSkills);
+    countEl.textContent = `${allSkills.length} skills`;
+  } catch(e) {
+    grid.innerHTML = `<div style="color:var(--accent);font-size:13px">Error loading skills: ${e.message}</div>`;
+  }
+}
+function filterSkills() {
+  const q = (document.getElementById('skillSearch').value || '').toLowerCase();
+  const cat = document.getElementById('skillCategoryFilter').value;
+  const filtered = allSkills.filter(s => {
+    const matchQ = !q || s.name.toLowerCase().includes(q) || (s.description||'').toLowerCase().includes(q) || (s.category||'').toLowerCase().includes(q);
+    const matchCat = !cat || s.category === cat;
+    return matchQ && matchCat;
+  });
+  renderSkills(filtered);
+  document.getElementById('skillCount').textContent = `${filtered.length} of ${allSkills.length} skills`;
+}
+function renderSkills(skills) {
+  const grid = document.getElementById('skillsGrid');
+  if (!skills.length) {
+    grid.innerHTML = '<div style="color:var(--text2);font-size:13px">No skills found.</div>';
+    return;
+  }
+  const sourceColors = { 'revvel-custom': '#7c3aed', 'revvel-expert': '#e94560' };
+  grid.innerHTML = skills.map(s => {
+    const color = sourceColors[s.source] || '#10b981';
+    const tags = (s.tags || []).slice(0, 4).map(t => `<span style="background:rgba(124,58,237,0.15);color:#a78bfa;padding:2px 7px;border-radius:10px;font-size:10px">${t}</span>`).join(' ');
+    return `<div class="card" style="cursor:pointer;border-color:rgba(124,58,237,0.2);transition:border-color .15s" onclick="invokeSkill('${s.id}','${s.name.replace(/'/g,'\\'')}')" onmouseover="this.style.borderColor='${color}'" onmouseout="this.style.borderColor='rgba(124,58,237,0.2)'">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px">
+        <div style="font-size:14px;font-weight:600;color:var(--text)">${s.name}</div>
+        <span style="background:${color}22;color:${color};padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;white-space:nowrap">${s.source}</span>
+      </div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:8px;line-height:1.5">${(s.description||'').slice(0,120)}${(s.description||'').length>120?'...':''}</div>
+      <div style="font-size:11px;color:var(--accent2);margin-bottom:6px">${s.category}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px">${tags}</div>
+    </div>`;
+  }).join('');
+}
+function invokeSkill(skillId, skillName) {
+  // Switch to chat tab and pre-fill a message invoking this skill
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelector('[data-tab="chat"]').classList.add('active');
+  document.getElementById('panel-chat').classList.add('active');
+  const input = document.getElementById('chatInput');
+  if (input) {
+    input.value = `@rex Use the ${skillName} skill to help me with: `;
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  }
+}
 
 // ── Init ───────────────────────────────────────────────────────────────────────────
 async function init() {
