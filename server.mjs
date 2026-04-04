@@ -223,31 +223,50 @@ db.exec(`
     source TEXT DEFAULT 'revvel-custom',
     version TEXT DEFAULT '1.0.0',
     enabled INTEGER DEFAULT 1,
+    openclaw_owner TEXT,
+    openclaw_slug TEXT,
+    openclaw_path TEXT,
+    user_invocable INTEGER DEFAULT 1,
+    file_count INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now'))
   );
 `);
 
-// Seed skills from catalog JSON on startup
+// Seed skills from catalog JSON on startup (upsert — always sync from catalog)
 try {
-  const skillsCount = db.prepare("SELECT COUNT(*) as c FROM skills").get();
-  if (skillsCount.c === 0) {
-    const catalogPath = join(__dirname, 'skills-catalog.json');
-    if (existsSync(catalogPath)) {
-      const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
-      const insertSkill = db.prepare(
-        "INSERT OR IGNORE INTO skills (id, name, description, category, tags, source, version) VALUES (?, ?, ?, ?, ?, ?, ?)"
-      );
-      const seedSkills = db.transaction((skills) => {
-        for (const s of skills) {
-          insertSkill.run(
-            s.id, s.name, s.description || '', s.category || 'General',
-            JSON.stringify(s.tags || []), s.source || 'revvel-custom', s.version || '1.0.0'
-          );
-        }
-      });
-      seedSkills(catalog);
-      console.log(`[Skills] Seeded ${catalog.length} skills from catalog`);
-    }
+  const catalogPath = join(__dirname, 'skills-catalog.json');
+  if (existsSync(catalogPath)) {
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
+    const existingCount = db.prepare("SELECT COUNT(*) as c FROM skills").get().c;
+    const upsertSkill = db.prepare(
+      `INSERT INTO skills (id, name, description, category, tags, source, version, openclaw_owner, openclaw_slug, openclaw_path, user_invocable, file_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         name = excluded.name,
+         description = excluded.description,
+         category = excluded.category,
+         tags = excluded.tags,
+         source = excluded.source,
+         version = excluded.version,
+         openclaw_owner = excluded.openclaw_owner,
+         openclaw_slug = excluded.openclaw_slug,
+         openclaw_path = excluded.openclaw_path,
+         user_invocable = excluded.user_invocable,
+         file_count = excluded.file_count`
+    );
+    const seedSkills = db.transaction((skills) => {
+      for (const s of skills) {
+        upsertSkill.run(
+          s.id, s.name, s.description || '', s.category || 'General',
+          JSON.stringify(s.tags || []), s.source || 'revvel-custom', s.version || '1.0.0',
+          s.openclaw_owner || null, s.openclaw_slug || null, s.openclaw_path || null,
+          s.user_invocable !== false ? 1 : 0, s.file_count || 0
+        );
+      }
+    });
+    seedSkills(catalog);
+    const newCount = db.prepare("SELECT COUNT(*) as c FROM skills").get().c;
+    console.log(`[Skills] Synced ${catalog.length} skills from catalog (${existingCount} → ${newCount} in DB)`);
   }
 } catch (e) { console.error('[Skills] Seed error:', e.message); }
 
@@ -1874,7 +1893,9 @@ app.get("/api/health", (_, res) => {
     status: "ok",
     service: "MindMappr Agent v8 — Command Center + Content Studio + Activity Window + Rex Tools",
     version: "8.1.0",
-    features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections", "connection_validation", "telegram_bot"],
+    features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections", "connection_validation", "telegram_bot", "discord_bot", "openclaw_skills_hub"],
+    skillsCount: db.prepare("SELECT COUNT(*) as c FROM skills WHERE enabled = 1").get().c,
+    skillsSources: db.prepare("SELECT source, COUNT(*) as count FROM skills WHERE enabled = 1 GROUP BY source").all(),
     agents: Object.keys(getAllAgentDefinitions()),
     ts: new Date().toISOString(),
     tools: ["elevenlabs_tts", "generate_image", "create_video", "create_pdf", "run_python", "web_scrape", "create_csv", "create_html", "send_slack"],
@@ -1904,7 +1925,8 @@ app.get("/api/skills", (req, res) => {
     const skills = db.prepare(sql).all(...params);
     const total = db.prepare("SELECT COUNT(*) as c FROM skills WHERE enabled = 1").get().c;
     const categories = db.prepare("SELECT DISTINCT category FROM skills WHERE enabled = 1 ORDER BY category").all().map(r => r.category);
-    res.json({ success: true, data: skills.map(s => ({ ...s, tags: JSON.parse(s.tags || '[]') })), total, categories });
+    const sources = db.prepare("SELECT source, COUNT(*) as count FROM skills WHERE enabled = 1 GROUP BY source ORDER BY count DESC").all();
+    res.json({ success: true, data: skills.map(s => ({ ...s, tags: JSON.parse(s.tags || '[]') })), total, categories, sources });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
   }
