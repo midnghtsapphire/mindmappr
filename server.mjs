@@ -2689,14 +2689,14 @@ app.get("/api/health", (_, res) => {
   const connRows = db.prepare("SELECT id FROM connections").all().map(r => r.id);
   res.json({
     status: "ok",
-    service: "MindMappr Agent v8 — Command Center + Content Studio + Activity Window + Rex Tools",
-    version: "8.1.0",
+    service: "MindMappr Agent v8.4 — Command Center + Content Studio + Activity Window + Rex Tools + Google Workspace",
+    version: "8.4.0",
     features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections", "connection_validation", "telegram_bot", "discord_bot", "openclaw_skills_hub"],
     skillsCount: db.prepare("SELECT COUNT(*) as c FROM skills WHERE enabled = 1").get().c,
     skillsSources: db.prepare("SELECT source, COUNT(*) as count FROM skills WHERE enabled = 1 GROUP BY source").all(),
     agents: Object.keys(getAllAgentDefinitions()),
     ts: new Date().toISOString(),
-    tools: ["elevenlabs_tts", "generate_image", "create_video", "create_pdf", "run_python", "web_scrape", "create_csv", "create_html", "send_slack"],
+    tools: ["elevenlabs_tts", "generate_image", "create_video", "create_pdf", "create_real_pdf", "create_spreadsheet", "send_email", "read_email", "upload_to_drive", "create_google_doc", "create_google_sheet", "fill_pdf", "run_python", "web_scrape", "create_csv", "create_html", "send_slack"],
     rexTools: Object.keys(TOOL_REGISTRY),
     llmConfigured: !!(LLM_API_KEY),
     telegramConfigured: !!(TELEGRAM_BOT_TOKEN),
