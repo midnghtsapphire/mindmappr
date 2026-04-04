@@ -2411,8 +2411,9 @@ const CONNECTORS = {
 
 // Debug endpoint to check raw DB state
 app.get("/api/connections/debug", (req, res) => {
-  // Simple session check inline since requireAuth is defined later
-  if (!req.session?.authenticated) return res.status(401).json({ error: 'Not authenticated' });
+  // Use the same cookie-based session check as requireAuth
+  const cookies = req.cookies || {};
+  if (!isValidSession(cookies.mm_session)) return res.status(401).json({ error: 'Not authenticated' });
   try {
     const rows = db.prepare("SELECT id, service_name, length(token) as token_len, account_name, connected_at FROM connections").all();
     const envCheck = {
