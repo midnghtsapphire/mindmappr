@@ -9,6 +9,7 @@ import { promisify } from "util";
 import Database from "better-sqlite3";
 import cron from "node-cron";
 import { initRexTools, executeTool as executeRexTool, parseToolCalls, getToolListForPrompt, TOOL_REGISTRY } from "./rex-tools.mjs";
+import { initDiscord, startDiscordBot, sendDiscordNotification, getDiscordStatus, disconnectDiscord } from "./discord-connector.mjs";
 
 const execAsync = promisify(exec);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -20,6 +21,7 @@ const LLM_BASE_URL = "https://openrouter.ai/api/v1";
 const LLM_MODEL = process.env.LLM_MODEL || "anthropic/claude-sonnet-4";
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
+const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || "";
 const UPLOADS_DIR = join(__dirname, "uploads");
 const DATA_DIR = join(__dirname, "data");
 
@@ -1902,6 +1904,8 @@ app.get("/api/health", (_, res) => {
     rexTools: Object.keys(TOOL_REGISTRY),
     llmConfigured: !!(LLM_API_KEY),
     telegramConfigured: !!(TELEGRAM_BOT_TOKEN),
+    discordConfigured: !!(DISCORD_BOT_TOKEN),
+    discordStatus: getDiscordStatus(),
     connectedServices: connRows,
   });
 });
@@ -2429,6 +2433,7 @@ const CONNECTORS = {
   digitalocean:     { name: "DigitalOcean",    icon: "🌊", color: "#0080FF", description: "Droplets, apps, deployments — Rex uses this for DO tools", keyBased: true },
   openrouter:       { name: "OpenRouter",      icon: "🧠", color: "#6366f1", description: "LLM gateway — Rex uses this for AI tool calls",       keyBased: true },
   telegram:         { name: "Telegram",        icon: "✈️", color: "#0088cc", description: "MindMappr Bot — chat with Rex via @googlieeyes_bot", keyBased: true },
+  discord:          { name: "Discord",         icon: "🎮", color: "#5865F2", description: "MindMappr Bot — all agents accessible via Discord", keyBased: true },
 };
 
 // Debug endpoint to check raw DB state
@@ -2506,6 +2511,22 @@ app.post("/api/connections/connect", async (req, res) => {
         const u = await r.json();
         if (!u.ok) return res.status(400).json({ success: false, error: `Telegram bot token invalid: ${u.description}` });
         resolvedName = u.result?.username ? `@${u.result.username}` : resolvedName;
+      } else if (id === "discord") {
+        // Validate Discord bot token by checking the gateway
+        const r = await fetch("https://discord.com/api/v10/users/@me", {
+          headers: { "Authorization": `Bot ${token}` },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!r.ok) return res.status(400).json({ success: false, error: `Discord bot token invalid (${r.status}). Create a bot at discord.com/developers.` });
+        const u = await r.json();
+        resolvedName = u.username ? `${u.username}#${u.discriminator || '0'}` : resolvedName;
+        // Start the Discord bot after successful validation
+        try {
+          await startDiscordBot(token);
+          console.log(`[Discord] Bot started after connection: ${resolvedName}`);
+        } catch (discordErr) {
+          console.error(`[Discord] Bot start failed after connection: ${discordErr.message}`);
+        }
       }
     } catch (validationErr) {
       if (validationErr.name === "TimeoutError" || validationErr.name === "AbortError") {
@@ -2886,4 +2907,17 @@ app.listen(PORT, () => {
   loadAndStartSchedules();
   // Set up Telegram webhook after a short delay to ensure server is ready
   setTimeout(setupTelegramWebhook, 5000);
+
+  // Initialize and start Discord bot
+  initDiscord({ invokeAgent: invokeAgent, getAllAgentDefinitions: getAllAgentDefinitions, logActivity: logActivity, getConnectionToken: getConnectionToken });
+  const discordToken = DISCORD_BOT_TOKEN || getConnectionToken("discord");
+  if (discordToken) {
+    setTimeout(() => {
+      startDiscordBot(discordToken).then(client => {
+        if (client) console.log("[Discord] Bot started successfully");
+      }).catch(err => console.error("[Discord] Bot start error:", err.message));
+    }, 3000);
+  } else {
+    console.log("[Discord] No bot token configured — add one in Connections tab or set DISCORD_BOT_TOKEN env var");
+  }
 });
