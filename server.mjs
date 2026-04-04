@@ -2413,6 +2413,22 @@ const CONNECTORS = {
   telegram:         { name: "Telegram",        icon: "✈️", color: "#0088cc", description: "MindMappr Bot — chat with Rex via @googlieeyes_bot", keyBased: true },
 };
 
+// Debug endpoint to check raw DB state
+app.get("/api/connections/debug", requireAuth, (_, res) => {
+  try {
+    const rows = db.prepare("SELECT id, service_name, length(token) as token_len, account_name, connected_at FROM connections").all();
+    const envCheck = {
+      GITHUB_PAT: !!(process.env.GITHUB_PAT),
+      GITHUB_TOKEN: !!(process.env.GITHUB_TOKEN),
+      DO_API_TOKEN: !!(process.env.DO_API_TOKEN),
+      LLM_API_KEY: !!(process.env.LLM_API_KEY),
+      OPENROUTER_API_KEY: !!(process.env.OPENROUTER_API_KEY),
+      TELEGRAM_BOT_TOKEN: !!(process.env.TELEGRAM_BOT_TOKEN),
+    };
+    res.json({ success: true, rows, envCheck });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get("/api/connections/list", (_, res) => {
   try {
     const storedRows = db.prepare("SELECT * FROM connections").all();
