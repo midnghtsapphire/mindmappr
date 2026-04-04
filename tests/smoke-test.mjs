@@ -190,9 +190,41 @@ function startServer() {
 }
 
 // ── Test 7: Check API endpoints ─────────────────────────────────────────────
+let sessionCookie = "";
+
+async function loginToServer() {
+  const password = process.env.APP_PASSWORD || "WizOz#123";
+  try {
+    const res = await fetch(`${BASE_URL}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+      signal: AbortSignal.timeout(5000),
+    });
+    const setCookie = res.headers.get("set-cookie");
+    if (setCookie) {
+      const match = setCookie.match(/mm_session=([^;]+)/);
+      if (match) sessionCookie = `mm_session=${match[1]}`;
+    }
+    const body = await res.json();
+    if (body.success) {
+      pass("Auth login", "Session cookie obtained");
+    } else {
+      fail("Auth login", "Login failed — endpoints will return 401");
+    }
+  } catch (e) {
+    fail("Auth login", e.message);
+  }
+}
+
 async function testEndpoint(name, path, checks = {}) {
   try {
-    const res = await fetch(`${BASE_URL}${path}`, { signal: AbortSignal.timeout(5000) });
+    const headers = {};
+    if (sessionCookie) headers["Cookie"] = sessionCookie;
+    const res = await fetch(`${BASE_URL}${path}`, {
+      headers,
+      signal: AbortSignal.timeout(5000),
+    });
     if (!res.ok) {
       fail(name, `HTTP ${res.status}`);
       return;
@@ -249,6 +281,9 @@ async function main() {
 
       // Wait a moment for DB init
       await new Promise(r => setTimeout(r, 2000));
+
+      // Authenticate first
+      await loginToServer();
 
       // Test all endpoints
       await testEndpoint("GET /api/health", "/api/health", { hasData: true });
