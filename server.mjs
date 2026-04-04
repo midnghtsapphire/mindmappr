@@ -257,8 +257,16 @@ try {
     { id: "openrouter",   envKey: process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || "", name: "OpenRouter" },
     { id: "telegram",     envKey: process.env.TELEGRAM_BOT_TOKEN || "",                            name: "Telegram" },
   ];
+  // Use UPSERT so we always update with the latest env var value (even if row already exists with empty token)
   const upsertConn = db.prepare(
-    "INSERT OR IGNORE INTO connections (id, service_name, token, account_name, connected_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))"
+    `INSERT INTO connections (id, service_name, token, account_name, connected_at, updated_at)
+     VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
+     ON CONFLICT(id) DO UPDATE SET
+       token = excluded.token,
+       account_name = excluded.account_name,
+       connected_at = COALESCE(connected_at, datetime('now')),
+       updated_at = datetime('now')
+     WHERE excluded.token != '' AND excluded.token != connections.token`
   );
   for (const { id, envKey, name } of envSeeds) {
     if (envKey) {
@@ -948,8 +956,11 @@ async function setupTelegramWebhook() {
     console.log("[Telegram] No bot token configured — skipping webhook setup");
     return;
   }
-  // Use custom domain if available, fall back to DO app URL
-  const webhookUrl = `https://mind-mappr.com/api/telegram/webhook`;
+  // Use DO app URL as primary webhook (reliable HTTPS); custom domain may have SSL proxy issues
+  const doUrl = `https://mindmappr-qarz8.ondigitalocean.app/api/telegram/webhook`;
+  const customUrl = `https://mind-mappr.com/api/telegram/webhook`;
+  // Try DO URL first (known to work), then custom domain as fallback
+  const webhookUrl = doUrl;
   try {
     const r = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
       method: "POST",
@@ -965,15 +976,14 @@ async function setupTelegramWebhook() {
       console.log(`[Telegram] Webhook registered at ${webhookUrl}`);
     } else {
       console.error(`[Telegram] Webhook setup failed: ${data.description}`);
-      // Try the DO URL as fallback
-      const fallbackUrl = `https://mindmappr-qarz8.ondigitalocean.app/api/telegram/webhook`;
+      // Try custom domain as fallback
       const r2 = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: fallbackUrl, allowed_updates: ["message", "edited_message", "callback_query"] }),
+        body: JSON.stringify({ url: customUrl, allowed_updates: ["message", "edited_message", "callback_query"] }),
       });
       const data2 = await r2.json();
-      console.log(`[Telegram] Fallback webhook: ${data2.ok ? 'success at ' + fallbackUrl : data2.description}`);
+      console.log(`[Telegram] Fallback webhook: ${data2.ok ? 'success at ' + customUrl : data2.description}`);
     }
   } catch (err) {
     console.error("[Telegram] Webhook setup failed:", err.message);
