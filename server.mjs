@@ -421,6 +421,27 @@ try {
 // Initialize Rex tools with DB and token getter
 initRexTools(db, getConnectionToken);
 
+// ── Auto-connect services from environment variables ──
+function autoConnectServices() {
+  const connections = [
+    { id: "openrouter", token: process.env.OPENROUTER_API_KEY || process.env.LLM_API_KEY, name: "OpenRouter" },
+    { id: "github", token: process.env.GITHUB_TOKEN || process.env.GITHUB_PAT, name: "GitHub" },
+    { id: "digitalocean", token: process.env.DO_API_TOKEN, name: "DigitalOcean" },
+    { id: "elevenlabs", token: process.env.ELEVENLABS_API_KEY, name: "ElevenLabs" },
+    { id: "stripe", token: process.env.STRIPE_SECRET_KEY, name: "Stripe" },
+    { id: "brave_search", token: process.env.BRAVE_SEARCH_API_KEY, name: "Brave Search" },
+  ];
+  for (const { id, token, name } of connections) {
+    if (!token) continue;
+    const existing = db.prepare("SELECT id FROM connections WHERE id = ?").get(id);
+    if (existing) continue; // Don't overwrite manual connections
+    db.prepare("INSERT OR IGNORE INTO connections (id, service_name, token, account_name, connected_at) VALUES (?, ?, ?, ?, ?)")
+      .run(id, name, token, `Auto-connected from env`, new Date().toISOString());
+    console.log(`[AutoConnect] ${name} connected from environment variable`);
+  }
+}
+autoConnectServices();
+
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Activity Window helpers ─────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
@@ -3019,14 +3040,14 @@ app.get("/api/health", (_, res) => {
   const connRows = db.prepare("SELECT id FROM connections").all().map(r => r.id);
   res.json({
     status: "ok",
-    service: "MindMappr Agent v8.4 — Command Center + Content Studio + Activity Window + Rex Tools + Google Workspace",
-    version: "8.4.0",
-    features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections", "connection_validation", "telegram_bot", "discord_bot", "openclaw_skills_hub"],
+    service: "MindMappr Agent v8.5 — Command Center + Content Studio + Activity Window + Rex Tools + Google Workspace + Legal + Stripe",
+    version: "8.5.0",
+    features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections", "connection_validation", "telegram_bot", "discord_bot", "openclaw_skills_hub", "web_search", "discord_channel_mgmt", "google_calendar", "stripe_integration", "legal_agent", "auto_connect"],
     skillsCount: db.prepare("SELECT COUNT(*) as c FROM skills WHERE enabled = 1").get().c,
     skillsSources: db.prepare("SELECT source, COUNT(*) as count FROM skills WHERE enabled = 1 GROUP BY source").all(),
     agents: Object.keys(getAllAgentDefinitions()),
     ts: new Date().toISOString(),
-    tools: ["elevenlabs_tts", "generate_image", "create_video", "create_pdf", "create_real_pdf", "create_spreadsheet", "send_email", "read_email", "upload_to_drive", "create_google_doc", "create_google_sheet", "fill_pdf", "run_python", "web_scrape", "create_csv", "create_html", "send_slack"],
+    tools: ["elevenlabs_tts", "generate_image", "create_video", "create_pdf", "create_real_pdf", "create_spreadsheet", "send_email", "read_email", "upload_to_drive", "create_google_doc", "create_google_sheet", "fill_pdf", "run_python", "web_scrape", "create_csv", "create_html", "send_slack", "web_search", "discord_create_channel", "discord_list_channels", "discord_delete_channel", "discord_send_message", "discord_create_role", "discord_list_roles", "create_calendar_event", "stripe_list_customers", "stripe_list_payments", "stripe_create_invoice"],
     rexTools: Object.keys(TOOL_REGISTRY),
     llmConfigured: !!(LLM_API_KEY),
     telegramConfigured: !!(TELEGRAM_BOT_TOKEN),
@@ -3560,6 +3581,7 @@ const CONNECTORS = {
   openrouter:       { name: "OpenRouter",      icon: "🧠", color: "#6366f1", description: "LLM gateway — Rex uses this for AI tool calls",       keyBased: true },
   telegram:         { name: "Telegram",        icon: "✈️", color: "#0088cc", description: "MindMappr Bot — chat with Rex via @googlieeyes_bot", keyBased: true },
   discord:          { name: "Discord",         icon: "🎮", color: "#5865F2", description: "MindMappr Bot — all agents accessible via Discord", keyBased: true },
+  brave_search:     { name: "Brave Search",    icon: "🔍", color: "#FB542B", description: "Web search API for real-time information", keyBased: true },
   google_drive:     { name: "Google Drive",    icon: "📁", color: "#0F9D58", description: "Upload files, create Docs & Sheets",  keyBased: false, oauthUrl: "/api/google/auth" },
   google:           { name: "Google Workspace",icon: "🔗", color: "#4285F4", description: "Connect Gmail, Drive, Docs, Sheets, Calendar — one login for all Google tools", keyBased: false, oauthUrl: "/api/google/auth" },
 };
@@ -4049,7 +4071,7 @@ app.get("/mindmappr/*", (req, res) => {
 // ── Start ───────────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 app.listen(PORT, () => {
-  console.log(`MindMappr Agent v8 \u2014 Command Center + Content Studio + Activity Window + Rex Tools running on port ${PORT}`);
+  console.log(`MindMappr Agent v8.5 \u2014 Command Center + Content Studio + Activity Window + Rex Tools + Legal + Stripe running on port ${PORT}`);
   console.log(`Agents online: ${Object.values(getAllAgentDefinitions()).map(a => a.name).join(", ")}`);
   loadAndStartSchedules();
   // Set up Telegram webhook after a short delay to ensure server is ready

@@ -574,6 +574,72 @@ export const EXTRA_TOOLS = {
     params: ["script", "title", "avatar_id", "voice_id"],
     example: 'TOOL:create_video:{"script":"Welcome to MindMappr! Here is your weekly report.","title":"Weekly Report"}',
   },
+  web_search: {
+    category: "Search",
+    description: "Search the web using Brave Search, Google Custom Search, or DuckDuckGo fallback",
+    params: ["query", "numResults"],
+    example: 'TOOL:web_search:{"query":"latest AI news","numResults":5}',
+  },
+  discord_create_channel: {
+    category: "Discord",
+    description: "Create a text or voice channel in the Discord server",
+    params: ["name", "type", "category", "topic"],
+    example: 'TOOL:discord_create_channel:{"name":"general-chat","type":"text","topic":"General discussion"}',
+  },
+  discord_list_channels: {
+    category: "Discord",
+    description: "List all channels in the Discord server",
+    params: ["guildId"],
+    example: 'TOOL:discord_list_channels:{}',
+  },
+  discord_delete_channel: {
+    category: "Discord",
+    description: "Delete a channel from the Discord server by channel ID",
+    params: ["channelId"],
+    example: 'TOOL:discord_delete_channel:{"channelId":"123456789"}',
+  },
+  discord_send_message: {
+    category: "Discord",
+    description: "Send a message to a specific Discord channel",
+    params: ["channelId", "message"],
+    example: 'TOOL:discord_send_message:{"channelId":"123456789","message":"Hello from MindMappr!"}',
+  },
+  discord_create_role: {
+    category: "Discord",
+    description: "Create a new role in the Discord server",
+    params: ["name", "color", "permissions"],
+    example: 'TOOL:discord_create_role:{"name":"Moderator","color":"#FF0000"}',
+  },
+  discord_list_roles: {
+    category: "Discord",
+    description: "List all roles in the Discord server",
+    params: ["guildId"],
+    example: 'TOOL:discord_list_roles:{}',
+  },
+  create_calendar_event: {
+    category: "Google",
+    description: "Create a Google Calendar event (requires Google connection)",
+    params: ["title", "startTime", "endTime", "description", "location"],
+    example: 'TOOL:create_calendar_event:{"title":"Team Meeting","startTime":"2026-04-05T10:00:00-06:00","endTime":"2026-04-05T11:00:00-06:00"}',
+  },
+  stripe_list_customers: {
+    category: "Stripe",
+    description: "List Stripe customers (requires STRIPE_SECRET_KEY)",
+    params: ["limit"],
+    example: 'TOOL:stripe_list_customers:{"limit":10}',
+  },
+  stripe_list_payments: {
+    category: "Stripe",
+    description: "List recent Stripe payment intents (requires STRIPE_SECRET_KEY)",
+    params: ["limit"],
+    example: 'TOOL:stripe_list_payments:{"limit":10}',
+  },
+  stripe_create_invoice: {
+    category: "Stripe",
+    description: "Create a draft Stripe invoice for a customer with line items (requires STRIPE_SECRET_KEY)",
+    params: ["customer_id", "items"],
+    example: 'TOOL:stripe_create_invoice:{"customer_id":"cus_xxx","items":[{"description":"Consulting","amount":5000,"currency":"usd"}]}',
+  },
 };
 
 /**
