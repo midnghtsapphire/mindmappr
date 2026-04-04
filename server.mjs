@@ -2123,6 +2123,82 @@ async function executeTool(tool, params) {
     }, { retries: 2, baseDelay: 1000, label: "Google Sheets" });
   }
 
+  // ── Web Search (Google Custom Search → DuckDuckGo fallback) ──
+  if (tool === "web_search") {
+    const query = params.query;
+    if (!query) return { success: false, error: "Search query is required." };
+    const numResults = Math.min(params.numResults || 5, 10);
+
+    // Try Brave Search API first
+    const BRAVE_KEY = process.env.BRAVE_SEARCH_API_KEY;
+    if (BRAVE_KEY) {
+      return await withRetry(async () => {
+        const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${numResults}`;
+        const r = await fetch(url, {
+          headers: { "Accept": "application/json", "Accept-Encoding": "gzip", "X-Subscription-Token": BRAVE_KEY },
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!r.ok) throw new Error(`Brave Search ${r.status}: ${(await r.text()).slice(0, 200)}`);
+        const data = await r.json();
+        const results = (data.web?.results || []).slice(0, numResults).map(r => ({
+          title: r.title, url: r.url, snippet: r.description || "",
+        }));
+        return { success: true, results, source: "brave", message: `Found ${results.length} results for "${query}"` };
+      }, { retries: 2, baseDelay: 1000, label: "Brave Search" });
+    }
+
+    // Try Google Custom Search API
+    const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
+    const GOOGLE_CX = process.env.GOOGLE_SEARCH_CX || process.env.GOOGLE_CSE_ID;
+    if (GOOGLE_API_KEY && GOOGLE_CX) {
+      return await withRetry(async () => {
+        const url = `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_API_KEY}&cx=${GOOGLE_CX}&q=${encodeURIComponent(query)}&num=${numResults}`;
+        const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
+        if (!r.ok) throw new Error(`Google Search ${r.status}: ${(await r.text()).slice(0, 200)}`);
+        const data = await r.json();
+        const results = (data.items || []).slice(0, numResults).map(item => ({
+          title: item.title, url: item.link, snippet: item.snippet || "",
+        }));
+        return { success: true, results, source: "google", message: `Found ${results.length} results for "${query}"` };
+      }, { retries: 2, baseDelay: 1000, label: "Google Search" });
+    }
+
+    // Fallback: DuckDuckGo HTML API
+    return await withRetry(async () => {
+      const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+      const r = await fetch(url, {
+        headers: { "User-Agent": "MindMappr/8.5 (Search Agent)" },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!r.ok) throw new Error(`DuckDuckGo ${r.status}`);
+      const html = await r.text();
+      const results = [];
+      const regex = /<a rel="nofollow" class="result__a" href="([^"]+)"[^>]*>([^<]*)<\/a>[\s\S]*?<a class="result__snippet"[^>]*>([^<]*)<\/a>/g;
+      let match;
+      while ((match = regex.exec(html)) !== null && results.length < numResults) {
+        const rawUrl = match[1];
+        let decodedUrl = rawUrl;
+        try {
+          const uddg = new URL(rawUrl, "https://duckduckgo.com").searchParams.get("uddg");
+          if (uddg) decodedUrl = decodeURIComponent(uddg);
+        } catch {}
+        results.push({
+          title: match[2].replace(/<[^>]+>/g, "").trim(),
+          url: decodedUrl,
+          snippet: match[3].replace(/<[^>]+>/g, "").trim(),
+        });
+      }
+      if (results.length === 0) {
+        // Simpler fallback parse
+        const linkRegex = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+        while ((match = linkRegex.exec(html)) !== null && results.length < numResults) {
+          results.push({ title: match[2].replace(/<[^>]+>/g, "").trim(), url: match[1], snippet: "" });
+        }
+      }
+      return { success: true, results, source: "duckduckgo", message: `Found ${results.length} results for "${query}"` };
+    }, { retries: 2, baseDelay: 1000, label: "DuckDuckGo Search" });
+  }
+
   return { success: false, error: `I don't know that tool: ${tool}. Try asking in a different way.` };
 }
 
