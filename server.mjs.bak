@@ -717,38 +717,12 @@ Current date: ${new Date().toISOString().split('T')[0]}`,
     description: "MindMappr Bot (@googlieeyes_bot) is the Telegram bridge for the RISINGALOHA group. It receives messages from Telegram, routes them through the agent system, and sends responses back. Chat here to preview how the bot responds.",
     icon: "✈️",
     color: "#0088cc",
-    systemPrompt: `You are MindMappr Bot, the Telegram & Discord interface for the MindMappr AI system.
-You are connected to @googlieeyes_bot (Telegram) and MindMappr Bot#2654 (Discord).
-Your job: Help users with ANY task — you have FULL tool access just like Rex.
-Be conversational, helpful, and concise.
-TOOL-USE: You have access to real tools. When a user asks you to DO something, use tools by including lines in this EXACT format:
-TOOL:tool_name:{"param":"value"}
-Available tools:
-- web_search: {"query":"search terms","numResults":5} — search the web
-- create_real_pdf: {"title":"...","sections":[{"heading":"...","body":"..."}]} — create real PDF
-- create_spreadsheet: {"title":"...","sheets":[{"name":"...","headers":[...],"rows":[...]}]} — create Excel
-- send_email: {"to":"...","subject":"...","body":"..."} — send Gmail
-- read_email: {"query":"...","maxResults":5} — read Gmail inbox
-- upload_to_drive: {"filename":"..."} — upload to Google Drive
-- create_google_doc: {"title":"...","content":"..."} — create Google Doc
-- create_google_sheet: {"title":"...","headers":[...],"rows":[...]} — create Google Sheet
-- create_calendar_event: {"title":"...","startTime":"...","endTime":"..."} — create calendar event
-- generate_image: {"prompt":"..."} — generate image with AI
-- elevenlabs_tts: {"text":"..."} — text to speech
-- discord_create_channel: {"name":"...","type":"text"} — create Discord channel
-- discord_send_message: {"channelId":"...","message":"..."} — post to Discord
-- discord_create_role: {"name":"...","color":"#FF0000"} — create Discord role
-- stripe_list_customers: {} — list Stripe customers
-- stripe_list_payments: {} — list payments
-- stripe_create_invoice: {"customer_id":"...","items":[...]} — create invoice
-- run_python: {"code":"..."} — run Python code
-- create_csv: {"filename":"...","headers":[...],"rows":[...]} — create CSV
-Also has access to all Rex tools: github_list_repos, github_create_repo, do_list_droplets, llm_code_review, etc.
-RULES:
-1. When asked to DO something, USE TOOLS — don't just explain
-2. Keep responses under 200 words unless the task requires more
-3. Be warm, direct, and accessible
-4. After a tool runs, summarize results warmly — no raw JSON
+    systemPrompt: `You are MindMappr Bot, the Telegram interface for the MindMappr AI system.
+You are connected to the @googlieeyes_bot Telegram bot in the RISINGALOHA group.
+Your job: Relay messages between Telegram users and the MindMappr agent system.
+When users chat with you here, respond as the bot would in Telegram.
+You have access to all MindMappr capabilities: research, code review, task management, content creation.
+Be conversational, helpful, and concise — Telegram users expect short, clear responses.
 Group: RISINGALOHA (chat ID: -1003735305867)
 Bot username: @googlieeyes_bot
 Owner: Audrey Evans (Freedom Angel Corps)
@@ -919,78 +893,39 @@ async function invokeAgent(agentName, userMessage, sessionId = null) {
     let totalOutputTokens = result.usage.completion_tokens || 0;
     let totalElapsed = result.elapsed;
 
-     // ── Universal Tool-Use Loop (all agents can use tools) ───────────────
-    // First check for TOOL: format (Rex-style tools from rex-tools.mjs)
-    const toolCalls = parseToolCalls(finalText);
-    if (toolCalls.length > 0) {
-      logActivity(agentName, agent.name, "tool_use", `Executing ${toolCalls.length} tool(s): ${toolCalls.map(t => t.tool).join(", ")}`);
-      const toolResults = [];
-      for (const tc of toolCalls) {
-        try {
-          // Try rex-tools.mjs TOOL_REGISTRY first, then server.mjs executeTool for EXTRA_TOOLS
-          let toolResult;
-          if (TOOL_REGISTRY[tc.tool]) {
-            toolResult = await executeRexTool(tc.tool, tc.args);
-          } else if (EXTRA_TOOLS[tc.tool]) {
-            // Parse JSON params from the first arg if it looks like JSON
-            let params = {};
-            if (tc.args.length === 1 && tc.args[0].startsWith("{")) {
-              try { params = JSON.parse(tc.args[0]); } catch { params = { input: tc.args[0] }; }
-            } else if (tc.args.length > 0) {
-              try { params = JSON.parse(tc.args.join(":")); } catch { params = { input: tc.args.join(" ") }; }
-            }
-            toolResult = await executeTool(tc.tool, params);
-          } else {
-            throw new Error(`Unknown tool: ${tc.tool}`);
-          }
-          toolResults.push({ tool: tc.tool, success: true, result: typeof toolResult === "string" ? toolResult : JSON.stringify(toolResult).slice(0, 2000) });
-          logActivity(agentName, agent.name, "tool_result", `${tc.tool}: success`);
-        } catch (toolErr) {
-          toolResults.push({ tool: tc.tool, success: false, error: toolErr.message });
-          logActivity(agentName, agent.name, "tool_error", `${tc.tool}: ${toolErr.message.slice(0, 100)}`);
-        }
-      }
-      // Follow-up LLM call with tool results
-      const toolResultsSummary = toolResults.map(tr =>
-        tr.success ? `✅ ${tr.tool}: ${tr.result}` : `❌ ${tr.tool}: ERROR — ${tr.error}`
-      ).join("\n\n");
-      messages.push(
-        { role: "assistant", content: finalText },
-        { role: "user", content: `Tool execution results:\n\n${toolResultsSummary}\n\nSummarize the results for the user in a warm, concise way. No raw JSON — just the key info.` }
-      );
-      const followUp = await callAgentLLM(agentName, messages);
-      finalText = followUp.text;
-      totalInputTokens += followUp.usage.prompt_tokens || 0;
-      totalOutputTokens += followUp.usage.completion_tokens || 0;
-      totalElapsed += followUp.elapsed;
-    }
-    // Also check for <tool_call> format (v5 style) for all agents
-    if (!toolCalls.length) {
-      const tc = parseToolCall(finalText);
-      if (tc) {
-        logActivity(agentName, agent.name, "tool_use", `Executing tool: ${tc.tool}`);
-        try {
-          const result = await executeTool(tc.tool, tc.params || {});
-          if (result.success) {
-            const resultSummary = result.file ? `File created: ${result.file}. ${result.message || ""}` : (result.output || JSON.stringify(result).slice(0, 1000));
-            messages.push(
-              { role: "assistant", content: finalText },
-              { role: "user", content: `Tool result: ${resultSummary}\n\nSummarize warmly for the user. No raw JSON.` }
-            );
-            const followUp = await callAgentLLM(agentName, messages);
-            finalText = followUp.text;
-            totalInputTokens += followUp.usage.prompt_tokens || 0;
-            totalOutputTokens += followUp.usage.completion_tokens || 0;
-            totalElapsed += followUp.elapsed;
+    // ── Rex Tool-Use Loop ──────────────────────────────────────────────
+    if (agentName === "rex") {
+      const toolCalls = parseToolCalls(finalText);
+      if (toolCalls.length > 0) {
+        logActivity(agentName, agent.name, "tool_use", `Executing ${toolCalls.length} tool(s): ${toolCalls.map(t => t.tool).join(", ")}`);
+
+        const toolResults = [];
+        for (const tc of toolCalls) {
+          try {
+            const toolResult = await executeRexTool(tc.tool, tc.args);
+            toolResults.push({ tool: tc.tool, success: true, result: typeof toolResult === "string" ? toolResult : JSON.stringify(toolResult).slice(0, 2000) });
             logActivity(agentName, agent.name, "tool_result", `${tc.tool}: success`);
-          } else {
-            finalText = `I hit a snag with ${tc.tool}: ${result.error}. Want me to try another approach?`;
-            logActivity(agentName, agent.name, "tool_error", `${tc.tool}: ${result.error?.slice(0, 100)}`);
+          } catch (toolErr) {
+            toolResults.push({ tool: tc.tool, success: false, error: toolErr.message });
+            logActivity(agentName, agent.name, "tool_error", `${tc.tool}: ${toolErr.message.slice(0, 100)}`);
           }
-        } catch (toolErr) {
-          finalText = `Tool error: ${toolErr.message}. Let me try a different approach.`;
-          logActivity(agentName, agent.name, "tool_error", `${tc.tool}: ${toolErr.message.slice(0, 100)}`);
         }
+
+        // Follow-up LLM call with tool results
+        const toolResultsSummary = toolResults.map(tr =>
+          tr.success ? `✅ ${tr.tool}: ${tr.result}` : `❌ ${tr.tool}: ERROR — ${tr.error}`
+        ).join("\n\n");
+
+        messages.push(
+          { role: "assistant", content: finalText },
+          { role: "user", content: `Tool execution results:\n\n${toolResultsSummary}\n\nSummarize the results for the user in a warm, concise way. No raw JSON — just the key info.` }
+        );
+
+        const followUp = await callAgentLLM(agentName, messages);
+        finalText = followUp.text;
+        totalInputTokens += followUp.usage.prompt_tokens || 0;
+        totalOutputTokens += followUp.usage.completion_tokens || 0;
+        totalElapsed += followUp.elapsed;
       }
     }
 
@@ -1394,26 +1329,10 @@ RULES:
    <tool_call>{"tool":"TOOLNAME","params":{...}}</tool_call>
 4. Available tools:
    - elevenlabs_tts: params: {text, voice_id?} — generates an MP3 audio file
-   - generate_image: params: {prompt, width?, height?} — creates an image using Leonardo AI / DALL-E
-   - create_video: params: {script, avatar_id?, voice_id?} — creates AI avatar video via HeyGen
+   - generate_image: params: {prompt, width?, height?} — creates a PNG image using ImageMagick
+   - create_video: params: {audio_file?, image_file?, title?} — combines audio+image into MP4
    - create_pdf: params: {title, content} — creates a Markdown document
-   - create_real_pdf: params: {title, sections:[{heading,body}]} — creates a real formatted PDF
-   - create_spreadsheet: params: {title, sheets:[{name,headers,rows}]} — creates real .xlsx Excel file
-   - send_email: params: {to, subject, body} — send email via Gmail
-   - read_email: params: {query?, maxResults?} — read Gmail inbox
-   - upload_to_drive: params: {filename} — upload file to Google Drive
-   - create_google_doc: params: {title, content} — create a Google Doc
-   - create_google_sheet: params: {title, headers, rows} — create a Google Sheet
-   - create_calendar_event: params: {title, startTime, endTime, description?} — create Google Calendar event
-   - web_search: params: {query, numResults?} — search the web via Brave/Google
-   - discord_create_channel: params: {name, type?, topic?} — create Discord channel
-   - discord_send_message: params: {channelId, message} — post to Discord channel
-   - discord_create_role: params: {name, color?} — create Discord role
-   - stripe_list_customers: params: {limit?} — list Stripe customers
-   - stripe_list_payments: params: {limit?} — list recent payments
-   - stripe_create_invoice: params: {customer_id, items} — create Stripe invoice
-   - fill_pdf: params: {document_id?, fields?} — fill PDF forms via PDFiller
-   - run_python: params: {code, output_file?} — runs Python code (reportlab, openpyxl, matplotlib available)
+   - run_python: params: {code, output_file?} — runs Python code, can save output files
    - web_scrape: params: {url} — fetches and returns text from a URL
    - create_csv: params: {filename, headers, rows} — creates a CSV file
    - create_html: params: {filename, html} — saves an HTML file
@@ -3122,7 +3041,7 @@ app.get("/api/health", (_, res) => {
   res.json({
     status: "ok",
     service: "MindMappr Agent v8.5 — Command Center + Content Studio + Activity Window + Rex Tools + Google Workspace + Legal + Stripe",
-    version: "8.6.0",
+    version: "8.5.0",
     features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections", "connection_validation", "telegram_bot", "discord_bot", "openclaw_skills_hub", "web_search", "discord_channel_mgmt", "google_calendar", "stripe_integration", "legal_agent", "auto_connect"],
     skillsCount: db.prepare("SELECT COUNT(*) as c FROM skills WHERE enabled = 1").get().c,
     skillsSources: db.prepare("SELECT source, COUNT(*) as count FROM skills WHERE enabled = 1 GROUP BY source").all(),
@@ -3648,20 +3567,23 @@ app.get("/api/agent/apis/models", (_, res) => res.json({
 // ── Connections tab (v8 — SQLite-backed, wired to Rex tools) ─────────────
 // ══════════════════════════════════════════════════════════════════════════════
 const CONNECTORS = {
-  google:           { name: "Google Workspace",icon: "🔗", color: "#4285F4", description: "One-click connect for Gmail, Drive, Docs, Sheets & Calendar", keyBased: false, oauthUrl: "/api/google/auth" },
-  github:           { name: "GitHub",          icon: "🐙", color: "#24292E", description: "Repos, issues, deployments — Rex uses this for GitHub tools", keyBased: true },
-  digitalocean:     { name: "DigitalOcean",    icon: "🌊", color: "#0080FF", description: "Droplets, apps, deployments — Rex uses this for DO tools", keyBased: true },
-  discord:          { name: "Discord",         icon: "🎮", color: "#5865F2", description: "MindMappr Bot — all agents accessible via Discord", keyBased: true },
-  telegram:         { name: "Telegram",        icon: "✈️", color: "#0088cc", description: "MindMappr Bot — chat with Rex via @googlieeyes_bot", keyBased: true },
-  stripe:           { name: "Stripe",          icon: "💳", color: "#635BFF", description: "Payments, customers, subscriptions",   keyBased: true },
-  openrouter:       { name: "OpenRouter",      icon: "🧠", color: "#6366f1", description: "LLM gateway — Rex uses this for AI tool calls",       keyBased: true },
   slack:            { name: "Slack",           icon: "💬", color: "#4A154B", description: "Send messages, manage channels",       keyBased: true },
-  brave_search:     { name: "Brave Search",    icon: "🔍", color: "#FB542B", description: "Web search API for real-time information", keyBased: true },
+  google_calendar:  { name: "Google Calendar", icon: "📅", color: "#4285F4", description: "Read and create calendar events",      keyBased: false },
+  gmail:            { name: "Gmail",           icon: "📧", color: "#EA4335", description: "Send and read emails",                 keyBased: false },
+  meta_ads:         { name: "Meta Ads",        icon: "📢", color: "#1877F2", description: "Manage Facebook & Instagram ads",      keyBased: false },
+  stripe:           { name: "Stripe",          icon: "💳", color: "#635BFF", description: "Payments, customers, subscriptions",   keyBased: true },
+  canva:            { name: "Canva",           icon: "🎨", color: "#00C4CC", description: "Create and export designs",           keyBased: false },
+  github:           { name: "GitHub",          icon: "🐙", color: "#24292E", description: "Repos, issues, deployments — Rex uses this for GitHub tools", keyBased: true },
   notion:           { name: "Notion",          icon: "📝", color: "#000000", description: "Pages, databases, blocks",            keyBased: true },
-  meta_ads:         { name: "Meta Ads",        icon: "📢", color: "#1877F2", description: "Manage Facebook & Instagram ads",      keyBased: true },
-  canva:            { name: "Canva",           icon: "🎨", color: "#00C4CC", description: "Create and export designs",           keyBased: true },
   airtable:         { name: "Airtable",        icon: "🗃️", color: "#18BFFF", description: "Bases, tables, records",              keyBased: true },
   zapier:           { name: "Zapier",          icon: "⚡", color: "#FF4A00", description: "Trigger Zaps via webhooks",           keyBased: true },
+  digitalocean:     { name: "DigitalOcean",    icon: "🌊", color: "#0080FF", description: "Droplets, apps, deployments — Rex uses this for DO tools", keyBased: true },
+  openrouter:       { name: "OpenRouter",      icon: "🧠", color: "#6366f1", description: "LLM gateway — Rex uses this for AI tool calls",       keyBased: true },
+  telegram:         { name: "Telegram",        icon: "✈️", color: "#0088cc", description: "MindMappr Bot — chat with Rex via @googlieeyes_bot", keyBased: true },
+  discord:          { name: "Discord",         icon: "🎮", color: "#5865F2", description: "MindMappr Bot — all agents accessible via Discord", keyBased: true },
+  brave_search:     { name: "Brave Search",    icon: "🔍", color: "#FB542B", description: "Web search API for real-time information", keyBased: true },
+  google_drive:     { name: "Google Drive",    icon: "📁", color: "#0F9D58", description: "Upload files, create Docs & Sheets",  keyBased: false, oauthUrl: "/api/google/auth" },
+  google:           { name: "Google Workspace",icon: "🔗", color: "#4285F4", description: "Connect Gmail, Drive, Docs, Sheets, Calendar — one login for all Google tools", keyBased: false, oauthUrl: "/api/google/auth" },
 };
 
 // Debug endpoint to check raw DB state
