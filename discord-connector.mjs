@@ -2,7 +2,7 @@
 // ── Discord Connector for MindMappr ─────────────────────────────────────────
 // ── All agents accessible via Discord (Rex, Watcher, Scheduler, etc.) ───────
 // ══════════════════════════════════════════════════════════════════════════════
-import { Client, GatewayIntentBits, Partials, EmbedBuilder } from "discord.js";
+import { Client, GatewayIntentBits, Partials, EmbedBuilder, ChannelType } from "discord.js";
 
 let discordClient = null;
 let invokeAgentFn = null;
@@ -18,6 +18,7 @@ const AGENT_ALIASES = {
   processor: ["processor", "process"],
   generator: ["generator", "gen", "writer"],
   telegram: ["mindmappr", "bot", "mm"],
+  lex: ["lex", "attorney", "lawyer", "legal"],
 };
 
 /**
@@ -286,10 +287,18 @@ export function disconnectDiscord() {
   }
 }
 
+/**
+ * Get the live Discord client instance (for channel/role management tools)
+ */
+export function getDiscordClient() {
+  return discordClient;
+}
+
 export default {
   initDiscord,
   startDiscordBot,
   sendDiscordNotification,
   getDiscordStatus,
   disconnectDiscord,
+  getDiscordClient,
 };

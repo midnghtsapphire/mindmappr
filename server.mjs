@@ -12,7 +12,8 @@ import PDFDocument from "pdfkit";
 import ExcelJS from "exceljs";
 import nodemailer from "nodemailer";
 import { initRexTools, executeTool as executeRexTool, parseToolCalls, getToolListForPrompt, TOOL_REGISTRY, EXTRA_TOOLS } from "./rex-tools.mjs";
-import { initDiscord, startDiscordBot, sendDiscordNotification, getDiscordStatus, disconnectDiscord } from "./discord-connector.mjs";
+import { initDiscord, startDiscordBot, sendDiscordNotification, getDiscordStatus, disconnectDiscord, getDiscordClient } from "./discord-connector.mjs";
+import { ChannelType } from "discord.js";
 
 const execAsync = promisify(exec);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -2121,6 +2122,221 @@ async function executeTool(tool, params) {
 
       return { success: true, spreadsheetId, title, url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`, message: `Google Sheet created: "${title}"` };
     }, { retries: 2, baseDelay: 1000, label: "Google Sheets" });
+  }
+
+  // ── Discord: Create Channel ──
+  if (tool === "discord_create_channel") {
+    try {
+      const client = getDiscordClient();
+      if (!client || !client.isReady()) return { success: false, error: "Discord bot is not connected. Please connect Discord in the Connections tab." };
+      const guild = client.guilds.cache.first();
+      if (!guild) return { success: false, error: "Bot is not in any Discord server." };
+      const name = params.name;
+      if (!name) return { success: false, error: "Channel name is required." };
+      const channelType = (params.type || "text").toLowerCase() === "voice" ? ChannelType.GuildVoice : ChannelType.GuildText;
+      const opts = { name, type: channelType };
+      if (params.topic) opts.topic = params.topic;
+      if (params.category) {
+        const cat = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && (c.id === params.category || c.name.toLowerCase() === params.category.toLowerCase()));
+        if (cat) opts.parent = cat.id;
+      }
+      const channel = await guild.channels.create(opts);
+      return { success: true, channelId: channel.id, name: channel.name, type: params.type || "text", message: `Channel #${channel.name} created successfully` };
+    } catch (e) { return { success: false, error: friendlyError(e, "Discord create channel") }; }
+  }
+
+  // ── Discord: List Channels ──
+  if (tool === "discord_list_channels") {
+    try {
+      const client = getDiscordClient();
+      if (!client || !client.isReady()) return { success: false, error: "Discord bot is not connected. Please connect Discord in the Connections tab." };
+      let guild;
+      if (params.guildId) {
+        guild = client.guilds.cache.get(params.guildId);
+      } else {
+        guild = client.guilds.cache.first();
+      }
+      if (!guild) return { success: false, error: "No Discord server found." };
+      const channels = guild.channels.cache.map(c => ({
+        id: c.id, name: c.name, type: c.type === ChannelType.GuildVoice ? "voice" : c.type === ChannelType.GuildCategory ? "category" : "text",
+        parent: c.parent?.name || null, position: c.position,
+      })).sort((a, b) => a.position - b.position);
+      return { success: true, guildName: guild.name, channels, message: `Found ${channels.length} channels in ${guild.name}` };
+    } catch (e) { return { success: false, error: friendlyError(e, "Discord list channels") }; }
+  }
+
+  // ── Discord: Delete Channel ──
+  if (tool === "discord_delete_channel") {
+    try {
+      const client = getDiscordClient();
+      if (!client || !client.isReady()) return { success: false, error: "Discord bot is not connected. Please connect Discord in the Connections tab." };
+      const channelId = params.channelId;
+      if (!channelId) return { success: false, error: "channelId is required." };
+      const channel = await client.channels.fetch(channelId);
+      if (!channel) return { success: false, error: `Channel ${channelId} not found.` };
+      const name = channel.name;
+      await channel.delete();
+      return { success: true, message: `Channel #${name} (${channelId}) deleted successfully` };
+    } catch (e) { return { success: false, error: friendlyError(e, "Discord delete channel") }; }
+  }
+
+  // ── Discord: Send Message ──
+  if (tool === "discord_send_message") {
+    try {
+      const client = getDiscordClient();
+      if (!client || !client.isReady()) return { success: false, error: "Discord bot is not connected. Please connect Discord in the Connections tab." };
+      const channelId = params.channelId;
+      const message = params.message;
+      if (!channelId) return { success: false, error: "channelId is required." };
+      if (!message) return { success: false, error: "message is required." };
+      const channel = await client.channels.fetch(channelId);
+      if (!channel) return { success: false, error: `Channel ${channelId} not found.` };
+      await channel.send(message);
+      return { success: true, message: `Message sent to #${channel.name || channelId}` };
+    } catch (e) { return { success: false, error: friendlyError(e, "Discord send message") }; }
+  }
+
+  // ── Discord: Create Role ──
+  if (tool === "discord_create_role") {
+    try {
+      const client = getDiscordClient();
+      if (!client || !client.isReady()) return { success: false, error: "Discord bot is not connected. Please connect Discord in the Connections tab." };
+      const guild = client.guilds.cache.first();
+      if (!guild) return { success: false, error: "Bot is not in any Discord server." };
+      const name = params.name;
+      if (!name) return { success: false, error: "Role name is required." };
+      const opts = { name };
+      if (params.color) opts.color = params.color;
+      if (params.permissions) opts.permissions = params.permissions;
+      const role = await guild.roles.create(opts);
+      return { success: true, roleId: role.id, name: role.name, color: role.hexColor, message: `Role "${role.name}" created successfully` };
+    } catch (e) { return { success: false, error: friendlyError(e, "Discord create role") }; }
+  }
+
+  // ── Discord: List Roles ──
+  if (tool === "discord_list_roles") {
+    try {
+      const client = getDiscordClient();
+      if (!client || !client.isReady()) return { success: false, error: "Discord bot is not connected. Please connect Discord in the Connections tab." };
+      let guild;
+      if (params.guildId) {
+        guild = client.guilds.cache.get(params.guildId);
+      } else {
+        guild = client.guilds.cache.first();
+      }
+      if (!guild) return { success: false, error: "No Discord server found." };
+      const roles = guild.roles.cache.map(r => ({
+        id: r.id, name: r.name, color: r.hexColor, members: r.members.size, position: r.position,
+      })).sort((a, b) => b.position - a.position);
+      return { success: true, guildName: guild.name, roles, message: `Found ${roles.length} roles in ${guild.name}` };
+    } catch (e) { return { success: false, error: friendlyError(e, "Discord list roles") }; }
+  }
+
+  // ── Google Calendar: Create Event ──
+  if (tool === "create_calendar_event") {
+    const accessToken = await getGoogleAccessToken();
+    if (!accessToken) {
+      return { success: false, error: "Google not connected. Please connect Google in the Connections tab first." };
+    }
+    return await withRetry(async () => {
+      const title = params.title;
+      if (!title) throw new Error("Event title is required.");
+      const startTime = params.startTime;
+      if (!startTime) throw new Error("Event startTime is required (ISO 8601 format).");
+      const endTime = params.endTime || new Date(new Date(startTime).getTime() + 3600000).toISOString();
+      const event = {
+        summary: title,
+        start: { dateTime: startTime, timeZone: "America/Denver" },
+        end: { dateTime: endTime, timeZone: "America/Denver" },
+      };
+      if (params.description) event.description = params.description;
+      if (params.location) event.location = params.location;
+      const r = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify(event),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!r.ok) { const t = await r.text(); throw new Error(`Google Calendar ${r.status}: ${t.slice(0, 200)}`); }
+      const data = await r.json();
+      return { success: true, eventId: data.id, htmlLink: data.htmlLink, message: `Calendar event created: "${title}"` };
+    }, { retries: 2, baseDelay: 1000, label: "Google Calendar" });
+  }
+
+  // ── Stripe: List Customers ──
+  if (tool === "stripe_list_customers") {
+    const STRIPE_KEY = process.env.STRIPE_SECRET_KEY;
+    if (!STRIPE_KEY) return { success: false, error: "Stripe not configured. Set STRIPE_SECRET_KEY env var." };
+    return await withRetry(async () => {
+      const limit = Math.min(params.limit || 10, 100);
+      const r = await fetch(`https://api.stripe.com/v1/customers?limit=${limit}`, {
+        headers: { "Authorization": `Bearer ${STRIPE_KEY}` },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!r.ok) { const t = await r.text(); throw new Error(`Stripe ${r.status}: ${t.slice(0, 200)}`); }
+      const data = await r.json();
+      const customers = (data.data || []).map(c => ({
+        id: c.id, name: c.name || c.email || "Unknown", email: c.email, created: new Date(c.created * 1000).toISOString(),
+      }));
+      return { success: true, customers, message: `Found ${customers.length} customers` };
+    }, { retries: 2, baseDelay: 1000, label: "Stripe Customers" });
+  }
+
+  // ── Stripe: List Payments ──
+  if (tool === "stripe_list_payments") {
+    const STRIPE_KEY = process.env.STRIPE_SECRET_KEY;
+    if (!STRIPE_KEY) return { success: false, error: "Stripe not configured. Set STRIPE_SECRET_KEY env var." };
+    return await withRetry(async () => {
+      const limit = Math.min(params.limit || 10, 100);
+      const r = await fetch(`https://api.stripe.com/v1/payment_intents?limit=${limit}`, {
+        headers: { "Authorization": `Bearer ${STRIPE_KEY}` },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!r.ok) { const t = await r.text(); throw new Error(`Stripe ${r.status}: ${t.slice(0, 200)}`); }
+      const data = await r.json();
+      const payments = (data.data || []).map(p => ({
+        id: p.id, amount: (p.amount / 100).toFixed(2), currency: p.currency, status: p.status, created: new Date(p.created * 1000).toISOString(),
+      }));
+      return { success: true, payments, message: `Found ${payments.length} payment intents` };
+    }, { retries: 2, baseDelay: 1000, label: "Stripe Payments" });
+  }
+
+  // ── Stripe: Create Invoice ──
+  if (tool === "stripe_create_invoice") {
+    const STRIPE_KEY = process.env.STRIPE_SECRET_KEY;
+    if (!STRIPE_KEY) return { success: false, error: "Stripe not configured. Set STRIPE_SECRET_KEY env var." };
+    return await withRetry(async () => {
+      const customerId = params.customer_id;
+      const items = params.items;
+      if (!customerId) throw new Error("customer_id is required.");
+      if (!items || !Array.isArray(items) || items.length === 0) throw new Error("items array is required (each with description and amount in cents).");
+      // Create invoice
+      const invRes = await fetch("https://api.stripe.com/v1/invoices", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${STRIPE_KEY}`, "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ customer: customerId }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!invRes.ok) { const t = await invRes.text(); throw new Error(`Stripe create invoice ${invRes.status}: ${t.slice(0, 200)}`); }
+      const invoice = await invRes.json();
+      // Add line items
+      for (const item of items) {
+        const itemRes = await fetch("https://api.stripe.com/v1/invoiceitems", {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${STRIPE_KEY}`, "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            customer: customerId,
+            invoice: invoice.id,
+            description: item.description || "Item",
+            amount: String(item.amount || 0),
+            currency: item.currency || "usd",
+          }),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!itemRes.ok) { const t = await itemRes.text(); throw new Error(`Stripe add item ${itemRes.status}: ${t.slice(0, 200)}`); }
+      }
+      return { success: true, invoiceId: invoice.id, status: "draft", message: `Draft invoice ${invoice.id} created for customer ${customerId} with ${items.length} item(s)` };
+    }, { retries: 2, baseDelay: 1000, label: "Stripe Invoice" });
   }
 
   // ── Web Search (Google Custom Search → DuckDuckGo fallback) ──
