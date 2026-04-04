@@ -9,6 +9,7 @@ import { promisify } from "util";
 import Database from "better-sqlite3";
 import cron from "node-cron";
 import { initRexTools, executeTool as executeRexTool, parseToolCalls, getToolListForPrompt, TOOL_REGISTRY } from "./rex-tools.mjs";
+import { initDiscord, startDiscordBot, sendDiscordNotification, getDiscordStatus, disconnectDiscord } from "./discord-connector.mjs";
 
 const execAsync = promisify(exec);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -20,6 +21,7 @@ const LLM_BASE_URL = "https://openrouter.ai/api/v1";
 const LLM_MODEL = process.env.LLM_MODEL || "anthropic/claude-sonnet-4";
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
+const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || "";
 const UPLOADS_DIR = join(__dirname, "uploads");
 const DATA_DIR = join(__dirname, "data");
 
@@ -223,31 +225,50 @@ db.exec(`
     source TEXT DEFAULT 'revvel-custom',
     version TEXT DEFAULT '1.0.0',
     enabled INTEGER DEFAULT 1,
+    openclaw_owner TEXT,
+    openclaw_slug TEXT,
+    openclaw_path TEXT,
+    user_invocable INTEGER DEFAULT 1,
+    file_count INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now'))
   );
 `);
 
-// Seed skills from catalog JSON on startup
+// Seed skills from catalog JSON on startup (upsert — always sync from catalog)
 try {
-  const skillsCount = db.prepare("SELECT COUNT(*) as c FROM skills").get();
-  if (skillsCount.c === 0) {
-    const catalogPath = join(__dirname, 'skills-catalog.json');
-    if (existsSync(catalogPath)) {
-      const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
-      const insertSkill = db.prepare(
-        "INSERT OR IGNORE INTO skills (id, name, description, category, tags, source, version) VALUES (?, ?, ?, ?, ?, ?, ?)"
-      );
-      const seedSkills = db.transaction((skills) => {
-        for (const s of skills) {
-          insertSkill.run(
-            s.id, s.name, s.description || '', s.category || 'General',
-            JSON.stringify(s.tags || []), s.source || 'revvel-custom', s.version || '1.0.0'
-          );
-        }
-      });
-      seedSkills(catalog);
-      console.log(`[Skills] Seeded ${catalog.length} skills from catalog`);
-    }
+  const catalogPath = join(__dirname, 'skills-catalog.json');
+  if (existsSync(catalogPath)) {
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
+    const existingCount = db.prepare("SELECT COUNT(*) as c FROM skills").get().c;
+    const upsertSkill = db.prepare(
+      `INSERT INTO skills (id, name, description, category, tags, source, version, openclaw_owner, openclaw_slug, openclaw_path, user_invocable, file_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         name = excluded.name,
+         description = excluded.description,
+         category = excluded.category,
+         tags = excluded.tags,
+         source = excluded.source,
+         version = excluded.version,
+         openclaw_owner = excluded.openclaw_owner,
+         openclaw_slug = excluded.openclaw_slug,
+         openclaw_path = excluded.openclaw_path,
+         user_invocable = excluded.user_invocable,
+         file_count = excluded.file_count`
+    );
+    const seedSkills = db.transaction((skills) => {
+      for (const s of skills) {
+        upsertSkill.run(
+          s.id, s.name, s.description || '', s.category || 'General',
+          JSON.stringify(s.tags || []), s.source || 'revvel-custom', s.version || '1.0.0',
+          s.openclaw_owner || null, s.openclaw_slug || null, s.openclaw_path || null,
+          s.user_invocable !== false ? 1 : 0, s.file_count || 0
+        );
+      }
+    });
+    seedSkills(catalog);
+    const newCount = db.prepare("SELECT COUNT(*) as c FROM skills").get().c;
+    console.log(`[Skills] Synced ${catalog.length} skills from catalog (${existingCount} → ${newCount} in DB)`);
   }
 } catch (e) { console.error('[Skills] Seed error:', e.message); }
 
@@ -1874,13 +1895,17 @@ app.get("/api/health", (_, res) => {
     status: "ok",
     service: "MindMappr Agent v8 — Command Center + Content Studio + Activity Window + Rex Tools",
     version: "8.1.0",
-    features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections", "connection_validation", "telegram_bot"],
+    features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections", "connection_validation", "telegram_bot", "discord_bot", "openclaw_skills_hub"],
+    skillsCount: db.prepare("SELECT COUNT(*) as c FROM skills WHERE enabled = 1").get().c,
+    skillsSources: db.prepare("SELECT source, COUNT(*) as count FROM skills WHERE enabled = 1 GROUP BY source").all(),
     agents: Object.keys(getAllAgentDefinitions()),
     ts: new Date().toISOString(),
     tools: ["elevenlabs_tts", "generate_image", "create_video", "create_pdf", "run_python", "web_scrape", "create_csv", "create_html", "send_slack"],
     rexTools: Object.keys(TOOL_REGISTRY),
     llmConfigured: !!(LLM_API_KEY),
     telegramConfigured: !!(TELEGRAM_BOT_TOKEN),
+    discordConfigured: !!(DISCORD_BOT_TOKEN),
+    discordStatus: getDiscordStatus(),
     connectedServices: connRows,
   });
 });
@@ -1904,7 +1929,8 @@ app.get("/api/skills", (req, res) => {
     const skills = db.prepare(sql).all(...params);
     const total = db.prepare("SELECT COUNT(*) as c FROM skills WHERE enabled = 1").get().c;
     const categories = db.prepare("SELECT DISTINCT category FROM skills WHERE enabled = 1 ORDER BY category").all().map(r => r.category);
-    res.json({ success: true, data: skills.map(s => ({ ...s, tags: JSON.parse(s.tags || '[]') })), total, categories });
+    const sources = db.prepare("SELECT source, COUNT(*) as count FROM skills WHERE enabled = 1 GROUP BY source ORDER BY count DESC").all();
+    res.json({ success: true, data: skills.map(s => ({ ...s, tags: JSON.parse(s.tags || '[]') })), total, categories, sources });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -2407,6 +2433,7 @@ const CONNECTORS = {
   digitalocean:     { name: "DigitalOcean",    icon: "🌊", color: "#0080FF", description: "Droplets, apps, deployments — Rex uses this for DO tools", keyBased: true },
   openrouter:       { name: "OpenRouter",      icon: "🧠", color: "#6366f1", description: "LLM gateway — Rex uses this for AI tool calls",       keyBased: true },
   telegram:         { name: "Telegram",        icon: "✈️", color: "#0088cc", description: "MindMappr Bot — chat with Rex via @googlieeyes_bot", keyBased: true },
+  discord:          { name: "Discord",         icon: "🎮", color: "#5865F2", description: "MindMappr Bot — all agents accessible via Discord", keyBased: true },
 };
 
 // Debug endpoint to check raw DB state
@@ -2484,6 +2511,22 @@ app.post("/api/connections/connect", async (req, res) => {
         const u = await r.json();
         if (!u.ok) return res.status(400).json({ success: false, error: `Telegram bot token invalid: ${u.description}` });
         resolvedName = u.result?.username ? `@${u.result.username}` : resolvedName;
+      } else if (id === "discord") {
+        // Validate Discord bot token by checking the gateway
+        const r = await fetch("https://discord.com/api/v10/users/@me", {
+          headers: { "Authorization": `Bot ${token}` },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!r.ok) return res.status(400).json({ success: false, error: `Discord bot token invalid (${r.status}). Create a bot at discord.com/developers.` });
+        const u = await r.json();
+        resolvedName = u.username ? `${u.username}#${u.discriminator || '0'}` : resolvedName;
+        // Start the Discord bot after successful validation
+        try {
+          await startDiscordBot(token);
+          console.log(`[Discord] Bot started after connection: ${resolvedName}`);
+        } catch (discordErr) {
+          console.error(`[Discord] Bot start failed after connection: ${discordErr.message}`);
+        }
       }
     } catch (validationErr) {
       if (validationErr.name === "TimeoutError" || validationErr.name === "AbortError") {
@@ -2864,4 +2907,17 @@ app.listen(PORT, () => {
   loadAndStartSchedules();
   // Set up Telegram webhook after a short delay to ensure server is ready
   setTimeout(setupTelegramWebhook, 5000);
+
+  // Initialize and start Discord bot
+  initDiscord({ invokeAgent: invokeAgent, getAllAgentDefinitions: getAllAgentDefinitions, logActivity: logActivity, getConnectionToken: getConnectionToken });
+  const discordToken = DISCORD_BOT_TOKEN || getConnectionToken("discord");
+  if (discordToken) {
+    setTimeout(() => {
+      startDiscordBot(discordToken).then(client => {
+        if (client) console.log("[Discord] Bot started successfully");
+      }).catch(err => console.error("[Discord] Bot start error:", err.message));
+    }, 3000);
+  } else {
+    console.log("[Discord] No bot token configured — add one in Connections tab or set DISCORD_BOT_TOKEN env var");
+  }
 });
