@@ -296,23 +296,19 @@ try {
     { id: "openrouter",   envKey: process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || "", name: "OpenRouter" },
     { id: "telegram",     envKey: process.env.TELEGRAM_BOT_TOKEN || "",                            name: "Telegram" },
   ];
-  // Use UPSERT so we always update with the latest env var value (even if row already exists with empty token)
+  // Always INSERT OR REPLACE so env var tokens are always current
   const upsertConn = db.prepare(
-    `INSERT INTO connections (id, service_name, token, account_name, connected_at, updated_at)
-     VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
-     ON CONFLICT(id) DO UPDATE SET
-       token = excluded.token,
-       account_name = excluded.account_name,
-       connected_at = COALESCE(connected_at, datetime('now')),
-       updated_at = datetime('now')
-     WHERE excluded.token != '' AND excluded.token != connections.token`
+    `INSERT OR REPLACE INTO connections (id, service_name, token, account_name, connected_at, updated_at)
+     VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`
   );
+  const seeded = [];
   for (const { id, envKey, name } of envSeeds) {
     if (envKey) {
       upsertConn.run(id, name, envKey, name);
+      seeded.push(id);
     }
   }
-  console.log("[Startup] Connection seeds applied from env vars");
+  console.log(`[Startup] Connection seeds applied from env vars: ${seeded.join(', ')}`);
 } catch (e) { console.error("[Startup] Connection seed error:", e.message); }
 
 // Initialize Rex tools with DB and token getter
