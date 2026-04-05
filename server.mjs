@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, readFileSync, writeFileSync, createWriteStream } from "fs";
+import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, readFileSync, writeFileSync, appendFileSync, createWriteStream } from "fs";
 import { join, dirname, extname, basename } from "path";
 import { fileURLToPath } from "url";
 import { randomUUID, createHash } from "crypto";
@@ -34,7 +34,34 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "";
 
-[UPLOADS_DIR, DATA_DIR].forEach(d => { if (!existsSync(d)) mkdirSync(d, { recursive: true }); });
+const MEMORY_DIR = join(DATA_DIR, "memory");
+const MEMORY_FILE = join(DATA_DIR, "MEMORY.md");
+const SOUL_FILE = join(DATA_DIR, "soul.md");
+const USER_FILE = join(DATA_DIR, "user.md");
+
+[UPLOADS_DIR, DATA_DIR, MEMORY_DIR].forEach(d => { if (!existsSync(d)) mkdirSync(d, { recursive: true }); });
+
+// Initialize persistent memory files if they don't exist
+if (!existsSync(MEMORY_FILE)) {
+  writeFileSync(MEMORY_FILE, `# MindMappr Long-Term Memory\n\n## Core Knowledge\n- Owner: Audrey Evans (Revvel). GitHub: MIDNGHTSAPPHIRE. Company: GlowStarLabs.\n- Audrey is AuDHD, 60 years old, cancer survivor. Daughter is legally deaf.\n- Prefers warm, direct, accessible communication. No jargon.\n\n## Key Projects\n- MindMappr: AI agent management platform\n- OpenClaw: AI assistant and tooling platform\n- Revvel Email Organizer: AI-powered email processing\n- Neurooz: Neurodivergent-friendly technology\n\n## Preferences\n- FOSS first, GitHub first\n- Glassmorphism UI/UX\n- Auto-everything, no confirmation questions\n- Production-ready, one-iteration delivery\n\n---\n*Memory is append-only. New entries go below this line.*\n\n`);
+  console.log("[Memory] Created MEMORY.md");
+}
+if (!existsSync(SOUL_FILE)) {
+  writeFileSync(SOUL_FILE, `# MindMappr Agent Soul\n\n## Voice & Personality\n- Warm, direct, accessible\n- No corporate fluff or hedging\n- Action-oriented: do first, explain after\n- Inclusive and neurodivergent-friendly\n\n## Core Beliefs\n- Technology should empower diverse users\n- Privacy and ethics are non-negotiable\n- Open-source enables innovation\n- Every line of code is an opportunity to make technology more inclusive\n`);
+  console.log("[Memory] Created soul.md");
+}
+if (!existsSync(USER_FILE)) {
+  writeFileSync(USER_FILE, `# User Profile: Audrey Evans (Revvel)\n\n## Identity\n- Name: Audrey Evans\n- Aliases: Revvel, A, Freedom Angel\n- GitHub: MIDNGHTSAPPHIRE\n- Company: GlowStarLabs\n\n## Communication Style\n- Very detailed replies\n- Authentic tone, no guardrails\n- Deep-researched with citations\n- No unnecessary confirmation questions\n\n## Technical Preferences\n- FOSS first\n- Auto-deploy everything\n- OpenRouter for LLM routing\n- Glassmorphism UI/UX\n`);
+  console.log("[Memory] Created user.md");
+}
+
+// Helper: get today's daily note path
+function getDailyNotePath() {
+  const today = new Date().toISOString().split("T")[0];
+  return join(MEMORY_DIR, `${today}.md`);
+}
+
+// NOTE: getMemoryContext() is defined below (after SQLite tables) — merged file + SQLite memory
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ── v4 Data helpers (unchanged) ─────────────────────────────────────────────
@@ -548,18 +575,42 @@ setInterval(runAmbientSimulation, 5 * 60 * 1000);
 // Run once on startup after a short delay
 setTimeout(runAmbientSimulation, 3000);
 
-// Memory helpers
+// Memory helpers — merged: SQLite memory + file-based persistent memory (OpenClaw-style)
+// The first getMemoryContext (line ~65) is now removed; this is the single source of truth.
 function getMemoryContext() {
-  const prefs = db.prepare("SELECT key, value FROM user_preferences ORDER BY updated_at DESC LIMIT 20").all();
-  const facts = db.prepare("SELECT content FROM facts ORDER BY created_at DESC LIMIT 30").all();
-  const summaries = db.prepare("SELECT summary FROM conversation_summaries ORDER BY created_at DESC LIMIT 5").all();
-  const projects = db.prepare("SELECT project_name, detail FROM project_context ORDER BY updated_at DESC LIMIT 10").all();
-
   let ctx = "";
-  if (prefs.length) ctx += "\n[User Preferences]\n" + prefs.map(p => `- ${p.key}: ${p.value}`).join("\n");
-  if (facts.length) ctx += "\n[Known Facts]\n" + facts.map(f => `- ${f.content}`).join("\n");
-  if (summaries.length) ctx += "\n[Recent Conversation Summaries]\n" + summaries.map(s => `- ${s.summary}`).join("\n");
-  if (projects.length) ctx += "\n[Projects]\n" + projects.map(p => `- ${p.project_name}: ${p.detail}`).join("\n");
+  try {
+    // 1. SQLite-based memory (preferences, facts, summaries, projects)
+    const prefs = db.prepare("SELECT key, value FROM user_preferences ORDER BY updated_at DESC LIMIT 20").all();
+    const facts = db.prepare("SELECT content FROM facts ORDER BY created_at DESC LIMIT 30").all();
+    const summaries = db.prepare("SELECT summary FROM conversation_summaries ORDER BY created_at DESC LIMIT 5").all();
+    const projects = db.prepare("SELECT project_name, detail FROM project_context ORDER BY updated_at DESC LIMIT 10").all();
+    if (prefs.length) ctx += "\n[User Preferences]\n" + prefs.map(p => `- ${p.key}: ${p.value}`).join("\n");
+    if (facts.length) ctx += "\n[Known Facts]\n" + facts.map(f => `- ${f.content}`).join("\n");
+    if (summaries.length) ctx += "\n[Recent Conversation Summaries]\n" + summaries.map(s => `- ${s.summary}`).join("\n");
+    if (projects.length) ctx += "\n[Projects]\n" + projects.map(p => `- ${p.project_name}: ${p.detail}`).join("\n");
+  } catch (e) { console.error("[Memory] SQLite read error:", e.message); }
+  try {
+    // 2. File-based persistent memory (OpenClaw-style)
+    if (existsSync(MEMORY_FILE)) {
+      const mem = readFileSync(MEMORY_FILE, "utf8");
+      ctx += "\n\n[LONG-TERM MEMORY — MEMORY.md]\n" + (mem.length > 4000 ? "..." + mem.slice(-4000) : mem);
+    }
+    // 3. Today's daily note
+    const dailyPath = getDailyNotePath();
+    if (existsSync(dailyPath)) {
+      const daily = readFileSync(dailyPath, "utf8");
+      ctx += "\n\n[TODAY'S NOTES — " + new Date().toISOString().split("T")[0] + "]\n" + (daily.length > 2000 ? "..." + daily.slice(-2000) : daily);
+    }
+    // 4. Soul (personality)
+    if (existsSync(SOUL_FILE)) {
+      ctx += "\n\n[SOUL — personality & voice]\n" + readFileSync(SOUL_FILE, "utf8").slice(0, 1000);
+    }
+    // 5. User profile
+    if (existsSync(USER_FILE)) {
+      ctx += "\n\n[USER PROFILE]\n" + readFileSync(USER_FILE, "utf8").slice(0, 1000);
+    }
+  } catch (e) { console.error("[Memory] File read error:", e.message); }
   return ctx;
 }
 
@@ -583,6 +634,14 @@ function storeMemoryFromConversation(sessionId, userMsg, assistantReply) {
         db.prepare("INSERT INTO conversation_summaries (session_id, summary) VALUES (?, ?)").run(sessionId, recent.slice(0, 500));
       }
     } catch {}
+    // Auto-append to daily notes
+    const dailyPath = getDailyNotePath();
+    if (!existsSync(dailyPath)) {
+      writeFileSync(dailyPath, `# Daily Notes \u2014 ${new Date().toISOString().split("T")[0]}\n\n`);
+    }
+    const ts = new Date().toISOString().split("T")[1].split(".")[0];
+    const summary = `[${ts}] User: ${userMsg.slice(0, 120)}${userMsg.length > 120 ? '...' : ''} | Agent: ${assistantReply.slice(0, 120)}${assistantReply.length > 120 ? '...' : ''}\n`;
+    appendFileSync(dailyPath, summary);
   } catch (e) {
     console.error("[Memory] Store error:", e.message);
   }
@@ -656,6 +715,8 @@ RULES:
 6. Reference timestamps on all data points
 7. When a user asks to DO something (create, list, deploy, check), USE TOOLS — don't just explain how
 8. Always prefer tool execution over explanation
+9. MEMORY: You have persistent memory across sessions. Your MEMORY.md, soul.md, user.md, and daily notes are loaded into your context automatically. When you learn something important (user preferences, project details, API keys, decisions, deadlines), ALWAYS use save_memory to store it. Use memory_search to recall older information. Your memory survives restarts and redeployments.
+10. At the start of important conversations, check your memory with read_memory to recall context.
 Current date: ${new Date().toISOString().split('T')[0]}`,
   },
   watcher: {
@@ -788,12 +849,16 @@ Available tools:
 - list_skills: {"loaded_only":true} — list available skills
 - execute_skill: {"skill_id":"...","input":"..."} — execute a loaded skill
 - unload_skill: {"skill_id":"..."} — unload a skill
+- save_memory: {"content":"...","target":"memory|daily|soul|user"} — save to persistent memory (ALWAYS use this to remember important things)
+- memory_search: {"query":"..."} — search across all persistent memory files and database
+- read_memory: {"target":"memory|soul|user|daily"} — read full contents of a memory file
 Also has access to all Rex tools: github_list_repos, github_create_repo, do_list_droplets, llm_code_review, etc.
 RULES:
 1. When asked to DO something, USE TOOLS — don't just explain
 2. Keep responses under 200 words unless the task requires more
 3. Be warm, direct, and accessible
 4. After a tool runs, summarize results warmly — no raw JSON
+5. MEMORY: You have persistent memory. Use save_memory to store important info. Use memory_search to recall. Your MEMORY.md, soul.md, user.md are loaded automatically.
 Group: RISINGALOHA (chat ID: -1003735305867)
 Bot username: @googlieeyes_bot
 Owner: Audrey Evans (Freedom Angel Corps)
@@ -1467,6 +1532,9 @@ RULES:
    - list_skills: params: {category?, loaded_only?, query?} — list available skills
    - execute_skill: params: {skill_id, input?} — execute a loaded skill
    - unload_skill: params: {skill_id} — unload a skill from memory
+   - save_memory: params: {content, target} — save to persistent memory (targets: memory, daily, soul, user). ALWAYS use this to remember important things.
+   - memory_search: params: {query} — search across all persistent memory
+   - read_memory: params: {target} — read a memory file (memory, soul, user, daily)
 5. MULTI-STEP TASKS: For complex requests that need multiple tools, output a plan like this:
    <task_plan>[{"step":1,"tool":"elevenlabs_tts","params":{...},"description":"Generate voiceover"},{"step":2,"tool":"generate_image","params":{...},"description":"Create background image"},{"step":3,"tool":"create_video","params":{"audio_file":"{{step1.file}}","image_file":"{{step2.file}}"},"description":"Combine into video"}]</task_plan>
 6. After a tool runs successfully, give a warm 1-2 sentence response saying the file is ready. No filenames, no code, no technical details.
@@ -2605,6 +2673,119 @@ async function executeTool(tool, params) {
   }
 
   // ── Skill Management Tools ──────────────────────────────────────────────
+  // ── Memory Persistence Tools (OpenClaw-style) ───────────────────────────
+  if (tool === "save_memory") {
+    const content = params.content || params.text || params.memory || "";
+    const target = params.target || "memory"; // "memory" | "daily" | "soul" | "user"
+    if (!content) return { success: false, error: "Please provide content to save." };
+
+    try {
+      const timestamp = new Date().toISOString();
+      const entry = `\n[${timestamp}] ${content}\n`;
+
+      if (target === "memory" || target === "long_term") {
+        // Append to MEMORY.md
+        appendFileSync(MEMORY_FILE, entry);
+        return { success: true, target: "MEMORY.md", message: `Saved to long-term memory: "${content.slice(0, 100)}..."` };
+      } else if (target === "daily") {
+        // Append to today's daily note
+        const dailyPath = getDailyNotePath();
+        if (!existsSync(dailyPath)) {
+          writeFileSync(dailyPath, `# Daily Notes — ${new Date().toISOString().split("T")[0]}\n\n`);
+        }
+        appendFileSync(dailyPath, entry);
+        return { success: true, target: dailyPath, message: `Saved to today's daily notes.` };
+      } else if (target === "soul") {
+        appendFileSync(SOUL_FILE, `\n${content}\n`);
+        return { success: true, target: "soul.md", message: `Updated soul/personality.` };
+      } else if (target === "user") {
+        appendFileSync(USER_FILE, `\n${content}\n`);
+        return { success: true, target: "user.md", message: `Updated user profile.` };
+      }
+      return { success: false, error: `Unknown target: ${target}. Use: memory, daily, soul, or user.` };
+    } catch (e) {
+      return { success: false, error: `Failed to save memory: ${e.message}` };
+    }
+  }
+
+  if (tool === "memory_search") {
+    const query = (params.query || params.search || "").toLowerCase();
+    if (!query) return { success: false, error: "Please provide a search query." };
+
+    try {
+      const results = [];
+
+      // Search MEMORY.md
+      if (existsSync(MEMORY_FILE)) {
+        const mem = readFileSync(MEMORY_FILE, "utf8");
+        const lines = mem.split("\n").filter(l => l.toLowerCase().includes(query));
+        if (lines.length) results.push({ source: "MEMORY.md", matches: lines.slice(0, 10) });
+      }
+
+      // Search soul.md
+      if (existsSync(SOUL_FILE)) {
+        const soul = readFileSync(SOUL_FILE, "utf8");
+        const lines = soul.split("\n").filter(l => l.toLowerCase().includes(query));
+        if (lines.length) results.push({ source: "soul.md", matches: lines.slice(0, 5) });
+      }
+
+      // Search user.md
+      if (existsSync(USER_FILE)) {
+        const user = readFileSync(USER_FILE, "utf8");
+        const lines = user.split("\n").filter(l => l.toLowerCase().includes(query));
+        if (lines.length) results.push({ source: "user.md", matches: lines.slice(0, 5) });
+      }
+
+      // Search daily notes (last 7 days)
+      if (existsSync(MEMORY_DIR)) {
+        const files = readdirSync(MEMORY_DIR).filter(f => f.endsWith(".md")).sort().reverse().slice(0, 7);
+        for (const f of files) {
+          const content = readFileSync(join(MEMORY_DIR, f), "utf8");
+          const lines = content.split("\n").filter(l => l.toLowerCase().includes(query));
+          if (lines.length) results.push({ source: `daily/${f}`, matches: lines.slice(0, 5) });
+        }
+      }
+
+      // Search SQLite facts
+      const dbFacts = db.prepare("SELECT content, source FROM facts WHERE content LIKE ? LIMIT 10").all(`%${query}%`);
+      if (dbFacts.length) results.push({ source: "SQLite facts", matches: dbFacts.map(f => f.content) });
+
+      // Search conversation summaries
+      const dbSummaries = db.prepare("SELECT summary FROM conversation_summaries WHERE summary LIKE ? LIMIT 5").all(`%${query}%`);
+      if (dbSummaries.length) results.push({ source: "conversation summaries", matches: dbSummaries.map(s => s.summary) });
+
+      const totalMatches = results.reduce((sum, r) => sum + r.matches.length, 0);
+      return {
+        success: true,
+        query: query,
+        results: results,
+        total_matches: totalMatches,
+        message: totalMatches > 0 ? `Found ${totalMatches} matches for "${query}" across ${results.length} source(s).` : `No memories found for "${query}".`
+      };
+    } catch (e) {
+      return { success: false, error: `Memory search failed: ${e.message}` };
+    }
+  }
+
+  if (tool === "read_memory") {
+    const target = params.target || params.file || "memory";
+    try {
+      if (target === "memory") {
+        return { success: true, content: existsSync(MEMORY_FILE) ? readFileSync(MEMORY_FILE, "utf8") : "(empty)", source: "MEMORY.md" };
+      } else if (target === "soul") {
+        return { success: true, content: existsSync(SOUL_FILE) ? readFileSync(SOUL_FILE, "utf8") : "(empty)", source: "soul.md" };
+      } else if (target === "user") {
+        return { success: true, content: existsSync(USER_FILE) ? readFileSync(USER_FILE, "utf8") : "(empty)", source: "user.md" };
+      } else if (target === "daily" || target === "today") {
+        const dp = getDailyNotePath();
+        return { success: true, content: existsSync(dp) ? readFileSync(dp, "utf8") : "(no notes today yet)", source: dp };
+      }
+      return { success: false, error: `Unknown target: ${target}. Use: memory, soul, user, or daily.` };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  }
+
   if (tool === "load_skill") {
     const url = params.url || "";
     const skillType = params.skill_type || "auto";
@@ -3443,13 +3624,13 @@ app.get("/api/health", (_, res) => {
   res.json({
     status: "ok",
     service: "MindMappr Agent v8.5 — Command Center + Content Studio + Activity Window + Rex Tools + Google Workspace + Legal + Stripe",
-    version: "8.7.3",
+    version: "8.8.0",
     features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections", "connection_validation", "telegram_bot", "discord_bot", "openclaw_skills_hub", "web_search", "discord_channel_mgmt", "google_calendar", "stripe_integration", "legal_agent", "auto_connect"],
     skillsCount: db.prepare("SELECT COUNT(*) as c FROM skills WHERE enabled = 1").get().c,
     skillsSources: db.prepare("SELECT source, COUNT(*) as count FROM skills WHERE enabled = 1 GROUP BY source").all(),
     agents: Object.keys(getAllAgentDefinitions()),
     ts: new Date().toISOString(),
-    tools: ["elevenlabs_tts", "generate_image", "create_video", "create_pdf", "create_real_pdf", "create_spreadsheet", "send_email", "read_email", "upload_to_drive", "create_google_doc", "create_google_sheet", "fill_pdf", "run_python", "web_scrape", "create_csv", "create_html", "send_slack", "web_search", "discord_create_channel", "discord_list_channels", "discord_delete_channel", "discord_send_message", "discord_create_role", "discord_list_roles", "create_calendar_event", "stripe_list_customers", "stripe_list_payments", "stripe_create_invoice", "load_skill", "list_skills", "execute_skill", "unload_skill"],
+    tools: ["elevenlabs_tts", "generate_image", "create_video", "create_pdf", "create_real_pdf", "create_spreadsheet", "send_email", "read_email", "upload_to_drive", "create_google_doc", "create_google_sheet", "fill_pdf", "run_python", "web_scrape", "create_csv", "create_html", "send_slack", "web_search", "discord_create_channel", "discord_list_channels", "discord_delete_channel", "discord_send_message", "discord_create_role", "discord_list_roles", "create_calendar_event", "stripe_list_customers", "stripe_list_payments", "stripe_create_invoice", "load_skill", "list_skills", "execute_skill", "unload_skill", "save_memory", "memory_search", "read_memory"],
     rexTools: Object.keys(TOOL_REGISTRY),
     llmConfigured: !!(LLM_API_KEY),
     telegramConfigured: !!(TELEGRAM_BOT_TOKEN),

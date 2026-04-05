@@ -664,6 +664,24 @@ export const EXTRA_TOOLS = {
     params: ["skill_id"],
     example: 'TOOL:unload_skill:{"skill_id":"web_scraper"}',
   },
+  save_memory: {
+    category: "Memory",
+    description: "Save information to persistent memory. Targets: 'memory' (long-term MEMORY.md), 'daily' (today's notes), 'soul' (personality), 'user' (user profile). ALWAYS use this to remember important things across sessions.",
+    params: ["content", "target"],
+    example: 'TOOL:save_memory:{"content":"User prefers dark mode and glassmorphism UI","target":"memory"}',
+  },
+  memory_search: {
+    category: "Memory",
+    description: "Search across all persistent memory (MEMORY.md, daily notes, soul.md, user.md, SQLite facts, conversation summaries). Use to recall older information.",
+    params: ["query"],
+    example: 'TOOL:memory_search:{"query":"stripe api key"}',
+  },
+  read_memory: {
+    category: "Memory",
+    description: "Read the full contents of a memory file. Targets: 'memory' (MEMORY.md), 'soul' (soul.md), 'user' (user.md), 'daily' (today's notes).",
+    params: ["target"],
+    example: 'TOOL:read_memory:{"target":"memory"}',
+  },
 };
 
 /**
