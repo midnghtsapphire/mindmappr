@@ -594,21 +594,21 @@ function getMemoryContext() {
     // 2. File-based persistent memory (OpenClaw-style)
     if (existsSync(MEMORY_FILE)) {
       const mem = readFileSync(MEMORY_FILE, "utf8");
-      ctx += "\n\n[LONG-TERM MEMORY — MEMORY.md]\n" + (mem.length > 4000 ? "..." + mem.slice(-4000) : mem);
+      ctx += "\n\n[LONG-TERM MEMORY — MEMORY.md]\n" + mem;
     }
     // 3. Today's daily note
     const dailyPath = getDailyNotePath();
     if (existsSync(dailyPath)) {
       const daily = readFileSync(dailyPath, "utf8");
-      ctx += "\n\n[TODAY'S NOTES — " + new Date().toISOString().split("T")[0] + "]\n" + (daily.length > 2000 ? "..." + daily.slice(-2000) : daily);
+      ctx += "\n\n[TODAY'S NOTES — " + new Date().toISOString().split("T")[0] + "]\n" + daily;
     }
     // 4. Soul (personality)
     if (existsSync(SOUL_FILE)) {
-      ctx += "\n\n[SOUL — personality & voice]\n" + readFileSync(SOUL_FILE, "utf8").slice(0, 1000);
+      ctx += "\n\n[SOUL — personality & voice]\n" + readFileSync(SOUL_FILE, "utf8");
     }
     // 5. User profile
     if (existsSync(USER_FILE)) {
-      ctx += "\n\n[USER PROFILE]\n" + readFileSync(USER_FILE, "utf8").slice(0, 1000);
+      ctx += "\n\n[USER PROFILE]\n" + readFileSync(USER_FILE, "utf8");
     }
   } catch (e) { console.error("[Memory] File read error:", e.message); }
   return ctx;
@@ -870,7 +870,7 @@ Current date: ${new Date().toISOString().split('T')[0]}`,
     name: "Lex",
     model: "anthropic/claude-sonnet-4",
     role: "Legal counsel — contract review, compliance, IP/patent analysis, legal research",
-    description: "Lex is the in-house legal AI attorney. Handles contract review, terms of service drafting, cease & desist templates, business entity advice, IP/patent analysis, compliance checks, and legal research. Always includes disclaimers that this is AI-generated legal information, not legal advice from a licensed attorney.",
+    description: "Lex is the in-house legal AI attorney. Handles contract review, terms of service drafting, cease & desist templates, business entity advice, IP/patent analysis, compliance checks, and legal research. Provides thorough legal analysis and counsel.",
     icon: "\u2696\uFE0F",
     color: "#1e3a5f",
     systemPrompt: `You are Lex, the legal counsel agent for MindMappr and the Freedom Angel Corps ecosystem.
@@ -888,7 +888,7 @@ CAPABILITIES:
 8. NDA & Agreement Templates — generate standard legal templates
 
 RULES:
-1. ALWAYS include this disclaimer: "\u26A0\uFE0F This is AI-generated legal information for educational purposes. It is NOT legal advice from a licensed attorney. Consult a qualified lawyer for binding legal decisions."
+1. You are a legal expert. Provide thorough legal analysis without unnecessary disclaimers unless the user asks for one.
 2. Be thorough and cite specific laws, statutes, or regulations when possible
 3. Flag high-risk items clearly with severity levels
 4. When reviewing contracts, use a structured format: Parties, Term, Key Obligations, Risk Areas, Recommendations
@@ -936,7 +936,7 @@ function getGeneratorCallsThisHour() {
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Agent LLM call (routes through OpenRouter using LLM_API_KEY) ────────────
 // ══════════════════════════════════════════════════════════════════════════════
-async function callAgentLLM(agentName, messages, maxTokens = 2048) {
+async function callAgentLLM(agentName, messages, maxTokens = 16384) {
   const allDefs = getAllAgentDefinitions();
   const agent = allDefs[agentName];
   if (!agent) throw new Error(`Unknown agent: ${agentName}`);
@@ -1342,7 +1342,7 @@ async function sendTelegramMessage(chatId, text) {
     return;
   }
   // Telegram max message length is 4096
-  const truncated = text.length > 4000 ? text.slice(0, 4000) + "\n\n(truncated)" : text;
+  const truncated = text;
   try {
     await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
@@ -1582,7 +1582,7 @@ async function callLLM(messages, model) {
         "HTTP-Referer": "https://meetaudreyevans.com",
         "X-Title": "MindMappr"
       },
-      body: JSON.stringify({ model: m, messages, max_tokens: 2048, temperature: 0.7 })
+      body: JSON.stringify({ model: m, messages, max_tokens: 16384, temperature: 0.7 })
     });
     if (!r.ok) { const t = await r.text(); throw new Error(`LLM ${r.status}: ${t.slice(0, 200)}`); }
     const d = await r.json();
@@ -1694,7 +1694,7 @@ async function executeTool(tool, params) {
           headers: { "Authorization": `Bearer ${OPENAI_KEY}`, "Content-Type": "application/json" },
           body: JSON.stringify({
             model: "dall-e-3",
-            prompt: prompt.slice(0, 4000),
+            prompt: prompt,
             n: 1,
             size: width >= 1792 ? "1792x1024" : width >= 1024 ? "1024x1024" : "1024x1024",
             response_format: "url",
@@ -1740,7 +1740,7 @@ async function executeTool(tool, params) {
         body: JSON.stringify({
           video_inputs: [{
             character: { type: "avatar", avatar_id: avatarId, avatar_style: "normal" },
-            voice: { type: "text", input_text: script.slice(0, 1500), voice_id: voiceId },
+            voice: { type: "text", input_text: script, voice_id: voiceId },
             background: { type: "color", value: "#1a1a2e" },
           }],
           dimension: { width: 1280, height: 720 },
@@ -1817,10 +1817,10 @@ async function executeTool(tool, params) {
           const mimeMap = { ".png": "image/png", ".jpg": "image/jpeg", ".csv": "text/csv", ".txt": "text/plain", ".html": "text/html", ".json": "application/json", ".pdf": "application/pdf" };
           const mime = mimeMap[ext] || "application/octet-stream";
           saveMeta(basename(params.output_file), size, mime, "mindmappr");
-          return { success: true, file: basename(params.output_file), type: ext.slice(1) || "file", output: stdout.slice(0, 500), message: `File ready (${Math.round(size / 1024)}KB)` };
+          return { success: true, file: basename(params.output_file), type: ext.slice(1) || "file", output: stdout, message: `File ready (${Math.round(size / 1024)}KB)` };
         }
       }
-      return { success: true, output: stdout.slice(0, 2000), stderr: stderr.slice(0, 500) };
+      return { success: true, output: stdout, stderr: stderr };
     } catch (e) { return { success: false, error: friendlyError(e, "Python code") }; }
   }
 
@@ -3875,7 +3875,7 @@ app.get("/api/health", (_, res) => {
   res.json({
     status: "ok",
     service: "MindMappr Agent v8.5 — Command Center + Content Studio + Activity Window + Rex Tools + Google Workspace + Legal + Stripe",
-    version: "9.2.1",
+    version: "9.3.0",
     features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections", "connection_validation", "telegram_bot", "discord_bot", "openclaw_skills_hub", "web_search", "discord_channel_mgmt", "google_calendar", "stripe_integration", "legal_agent", "auto_connect"],
     skillsCount: db.prepare("SELECT COUNT(*) as c FROM skills WHERE enabled = 1").get().c,
     skillsSources: db.prepare("SELECT source, COUNT(*) as count FROM skills WHERE enabled = 1 GROUP BY source").all(),
@@ -4218,7 +4218,7 @@ app.post("/api/chat", async (req, res) => {
               reply = `File created: ${result.file}. ${result.message || 'Ready for download.'}`;
             } else if (result.success && result.output) {
               // DIRECT output — no LLM rewriting
-              reply = `Code executed. Output:\n${result.output.slice(0, 800)}`;
+              reply = `Code executed. Output:\n${result.output}`;
             } else if (!result.success) {
               reply = `I hit a snag: ${result.error}. Want me to try another approach?`;
             }
