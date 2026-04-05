@@ -1072,19 +1072,38 @@ async function invokeAgent(agentName, userMessage, sessionId = null) {
           logActivity(agentName, agent.name, "tool_error", `${tc.tool}: ${toolErr.message.slice(0, 100)}`);
         }
       }
-      // Follow-up LLM call with tool results — STRICT: no hallucination allowed
-      const toolResultsSummary = toolResults.map(tr =>
-        tr.success ? `✅ ${tr.tool}: ${tr.result}` : `❌ ${tr.tool}: ERROR — ${tr.error}`
-      ).join("\n\n");
-      messages.push(
-        { role: "assistant", content: finalText },
-        { role: "user", content: `TOOL EXECUTION RESULTS (this is the REAL data — do NOT invent, embellish, or add any numbers/facts not present here):\n\n${toolResultsSummary}\n\nRULES FOR YOUR RESPONSE:\n1. ONLY report numbers and facts that appear EXACTLY in the tool results above\n2. If a tool failed, say it failed and show the exact error\n3. Do NOT invent counts, file names, or success messages\n4. Do NOT say "loaded X skills" unless the results explicitly say that exact number\n5. If the results are empty or unclear, say so honestly\n6. Keep it concise but TRUTHFUL` }
-      );
-      const followUp = await callAgentLLM(agentName, messages);
-      finalText = followUp.text;
-      totalInputTokens += followUp.usage.prompt_tokens || 0;
-      totalOutputTokens += followUp.usage.completion_tokens || 0;
-      totalElapsed += followUp.elapsed;
+      // DIRECT tool output — NO LLM rewriting to prevent hallucination
+      const toolResultsSummary = toolResults.map(tr => {
+        if (tr.success) {
+          // Parse the JSON result to extract key fields for readable output
+          try {
+            const parsed = JSON.parse(tr.result);
+            const lines = [`**Tool: ${tr.tool}** — ✅ Success`];
+            for (const [k, v] of Object.entries(parsed)) {
+              if (k === 'success') continue;
+              if (Array.isArray(v)) {
+                lines.push(`• ${k}: ${v.length} items`);
+                v.slice(0, 10).forEach(item => {
+                  if (typeof item === 'object') lines.push(`  - ${JSON.stringify(item)}`);
+                  else lines.push(`  - ${item}`);
+                });
+                if (v.length > 10) lines.push(`  ... and ${v.length - 10} more`);
+              } else if (typeof v === 'object' && v !== null) {
+                lines.push(`• ${k}: ${JSON.stringify(v)}`);
+              } else {
+                lines.push(`• ${k}: ${v}`);
+              }
+            }
+            return lines.join('\n');
+          } catch {
+            return `**Tool: ${tr.tool}** — ✅ ${tr.result}`;
+          }
+        } else {
+          return `**Tool: ${tr.tool}** — ❌ FAILED: ${tr.error}`;
+        }
+      }).join('\n\n');
+      // Append raw tool output directly — no LLM rewriting
+      finalText = `Here are the actual results:\n\n${toolResultsSummary}`;
     }
     // Also check for <tool_call> format (v5 style) for all agents
     if (!toolCalls.length) {
@@ -1095,15 +1114,8 @@ async function invokeAgent(agentName, userMessage, sessionId = null) {
           const result = await executeTool(tc.tool, tc.params || {});
           if (result.success) {
             const resultSummary = result.file ? `File created: ${result.file}. ${result.message || ""}` : (result.output || JSON.stringify(result).slice(0, 1000));
-            messages.push(
-              { role: "assistant", content: finalText },
-              { role: "user", content: `TOOL RESULT (REAL data — do NOT invent anything not shown here):\n${resultSummary}\n\nReport ONLY what is in the result above. Do NOT add numbers, counts, or facts not present. If it failed, say so.` }
-            );
-            const followUp = await callAgentLLM(agentName, messages);
-            finalText = followUp.text;
-            totalInputTokens += followUp.usage.prompt_tokens || 0;
-            totalOutputTokens += followUp.usage.completion_tokens || 0;
-            totalElapsed += followUp.elapsed;
+            // DIRECT output — no LLM rewriting
+            finalText = `**Tool: ${tc.tool}** — ✅ Result:\n${resultSummary}`;
             logActivity(agentName, agent.name, "tool_result", `${tc.tool}: success`);
           } else {
             finalText = `I hit a snag with ${tc.tool}: ${result.error}. Want me to try another approach?`;
@@ -3863,7 +3875,7 @@ app.get("/api/health", (_, res) => {
   res.json({
     status: "ok",
     service: "MindMappr Agent v8.5 — Command Center + Content Studio + Activity Window + Rex Tools + Google Workspace + Legal + Stripe",
-    version: "9.1.0",
+    version: "9.2.0",
     features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections", "connection_validation", "telegram_bot", "discord_bot", "openclaw_skills_hub", "web_search", "discord_channel_mgmt", "google_calendar", "stripe_integration", "legal_agent", "auto_connect"],
     skillsCount: db.prepare("SELECT COUNT(*) as c FROM skills WHERE enabled = 1").get().c,
     skillsSources: db.prepare("SELECT source, COUNT(*) as count FROM skills WHERE enabled = 1 GROUP BY source").all(),
@@ -4186,14 +4198,8 @@ app.post("/api/chat", async (req, res) => {
             const lastFile = planResult.files[planResult.files.length - 1];
             generatedFile = { name: lastFile.name, type: lastFile.type, message: lastFile.message };
             planProgress = { steps: plan.map((s, i) => ({ step: s.step || i + 1, description: s.description, status: "done" })) };
-            const fu = await callLLM([
-              { role: "system", content: SYSTEM_PROMPT },
-              ...history.slice(-10),
-              { role: "user", content: userContent },
-              { role: "assistant", content: reply },
-              { role: "user", content: `All ${planResult.totalSteps} steps completed successfully! Final file: ${lastFile.name}. ${lastFile.message}. Report exactly what was created based on the data above. Be truthful. Do NOT invent file names or details not shown.` }
-            ], model);
-            reply = (typeof fu === "string" ? fu : "All done!").replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "").replace(/<task_plan>[\s\S]*?<\/task_plan>/g, "").trim();
+            // DIRECT output — no LLM rewriting
+            reply = `All ${planResult.totalSteps} steps completed. File created: ${lastFile.name}. ${lastFile.message}`;
           } else if (!planResult.success) {
             reply = `I got through ${planResult.completedSteps} of ${planResult.totalSteps} steps, but hit a snag: ${planResult.error}. Want me to try a different approach?`;
             if (planResult.files.length > 0) {
@@ -4208,23 +4214,11 @@ app.post("/api/chat", async (req, res) => {
             const result = await executeTool(tc.tool, tc.params || {});
             if (result.success && result.file) {
               generatedFile = { name: result.file, type: result.type, message: result.message };
-              const fu = await callLLM([
-                { role: "system", content: SYSTEM_PROMPT },
-                ...history.slice(-10),
-                { role: "user", content: userContent },
-                { role: "assistant", content: reply },
-                { role: "user", content: `Done. File created: ${result.file}. ${result.message}. Report exactly what was created. Be truthful and concise. Only state facts from the result above.` }
-              ], model);
-              reply = (typeof fu === "string" ? fu : "Your file is ready!").replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "").trim();
+              // DIRECT output — no LLM rewriting
+              reply = `File created: ${result.file}. ${result.message || 'Ready for download.'}`;
             } else if (result.success && result.output) {
-              const fu = await callLLM([
-                { role: "system", content: SYSTEM_PROMPT },
-                ...history.slice(-10),
-                { role: "user", content: userContent },
-                { role: "assistant", content: reply },
-                { role: "user", content: `Code ran. Output: ${result.output.slice(0, 800)}. Report the output truthfully. Only state facts from the result above. Do NOT add information not present.` }
-              ], model);
-              reply = (typeof fu === "string" ? fu : "Done!").replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "").trim();
+              // DIRECT output — no LLM rewriting
+              reply = `Code executed. Output:\n${result.output.slice(0, 800)}`;
             } else if (!result.success) {
               reply = `I hit a snag: ${result.error}. Want me to try another approach?`;
             }
