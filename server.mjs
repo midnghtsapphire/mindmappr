@@ -852,6 +852,8 @@ Available tools:
 - save_memory: {"content":"...","target":"memory|daily|soul|user"} — save to persistent memory (ALWAYS use this to remember important things)
 - memory_search: {"query":"..."} — search across all persistent memory files and database
 - read_memory: {"target":"memory|soul|user|daily"} — read full contents of a memory file
+- discover_skills: {"owner":"midnghtsapphire","auto_load":true} — scan all GitHub repos for skill files and auto-load them
+- scan_repo_skills: {"repo":"owner/repo","auto_load":true} — scan a specific repo for skills and load them
 Also has access to all Rex tools: github_list_repos, github_create_repo, do_list_droplets, llm_code_review, etc.
 RULES:
 1. When asked to DO something, USE TOOLS — don't just explain
@@ -1535,6 +1537,8 @@ RULES:
    - save_memory: params: {content, target} — save to persistent memory (targets: memory, daily, soul, user). ALWAYS use this to remember important things.
    - memory_search: params: {query} — search across all persistent memory
    - read_memory: params: {target} — read a memory file (memory, soul, user, daily)
+   - discover_skills: params: {owner?, auto_load?} — scan all GitHub repos for skill repos and auto-load
+   - scan_repo_skills: params: {repo, auto_load?} — scan a specific repo for skills
 5. MULTI-STEP TASKS: For complex requests that need multiple tools, output a plan like this:
    <task_plan>[{"step":1,"tool":"elevenlabs_tts","params":{...},"description":"Generate voiceover"},{"step":2,"tool":"generate_image","params":{...},"description":"Create background image"},{"step":3,"tool":"create_video","params":{"audio_file":"{{step1.file}}","image_file":"{{step2.file}}"},"description":"Combine into video"}]</task_plan>
 6. After a tool runs successfully, give a warm 1-2 sentence response saying the file is ready. No filenames, no code, no technical details.
@@ -2795,12 +2799,20 @@ async function executeTool(tool, params) {
     try {
       let content;
 
+      // Normalize URL: handle short-form like "owner/repo/path/file.py" or "MIDNGHTSAPPHIRE/revvel-expert-skills/skills/skill.py"
+      const isFullUrl = url.includes("github.com") || url.includes("raw.githubusercontent.com") || url.startsWith("http");
+      const looksLikeGitHub = !isFullUrl && url.split("/").length >= 3 && !url.includes(" ");
+      if (looksLikeGitHub) {
+        url = `https://github.com/${url}`;
+      }
+
       // For GitHub URLs, use the GitHub API with PAT for auth (handles private repos)
       if (url.includes("github.com") || url.includes("raw.githubusercontent.com")) {
         const ghToken = getConnectionToken("github") || process.env.GITHUB_PAT || process.env.GITHUB_TOKEN || "";
 
         // Parse GitHub URL to extract owner/repo/branch/path
-        // Formats: github.com/owner/repo/blob/branch/path or raw.githubusercontent.com/owner/repo/branch/path
+        // Formats: github.com/owner/repo/blob/branch/path, raw.githubusercontent.com/owner/repo/branch/path,
+        //          or short-form: owner/repo/path/to/file.py (auto-prefixed above)
         let owner, repo, branch, filePath;
         const cleanUrl = url.replace(/^https?:\/\//, "");
 
@@ -2808,43 +2820,57 @@ async function executeTool(tool, params) {
           const parts = cleanUrl.replace("raw.githubusercontent.com/", "").split("/");
           owner = parts[0]; repo = parts[1]; branch = parts[2]; filePath = parts.slice(3).join("/");
         } else {
-          // github.com/owner/repo/blob/branch/path
+          // github.com/owner/repo/blob/branch/path OR github.com/owner/repo/path (no blob)
           const parts = cleanUrl.replace("github.com/", "").split("/");
           owner = parts[0]; repo = parts[1];
           // Skip 'blob' or 'tree' if present
           const blobIdx = parts.indexOf("blob");
           const treeIdx = parts.indexOf("tree");
-          const startIdx = blobIdx >= 0 ? blobIdx + 1 : (treeIdx >= 0 ? treeIdx + 1 : 2);
-          branch = parts[startIdx] || "main";
-          filePath = parts.slice(startIdx + 1).join("/");
+          if (blobIdx >= 0 || treeIdx >= 0) {
+            const startIdx = blobIdx >= 0 ? blobIdx + 1 : treeIdx + 1;
+            branch = parts[startIdx] || null;
+            filePath = parts.slice(startIdx + 1).join("/");
+          } else {
+            // No blob/tree — treat everything after owner/repo as the file path
+            branch = null; // will auto-detect
+            filePath = parts.slice(2).join("/");
+          }
         }
 
         if (!owner || !repo || !filePath) {
-          throw new Error(`Could not parse GitHub URL. Expected format: github.com/owner/repo/blob/branch/path/to/file`);
+          throw new Error(`Could not parse GitHub URL. Accepted formats: github.com/owner/repo/blob/branch/path, github.com/owner/repo/path, or owner/repo/path/to/file`);
         }
 
         // Build auth headers
         const headers = { "Accept": "application/vnd.github.v3.raw", "User-Agent": "MindMappr-Agent" };
         if (ghToken) headers["Authorization"] = `Bearer ${ghToken}`;
 
-        // Try GitHub API with the parsed branch
+        // Auto-detect default branch if not known
+        if (!branch) {
+          try {
+            const repoHeaders = { "Accept": "application/vnd.github.v3+json", "User-Agent": "MindMappr-Agent" };
+            if (ghToken) repoHeaders["Authorization"] = `Bearer ${ghToken}`;
+            const repoResp = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers: repoHeaders });
+            if (repoResp.ok) {
+              const repoData = await repoResp.json();
+              branch = repoData.default_branch || "main";
+            } else { branch = "main"; }
+          } catch { branch = "main"; }
+        }
+
+        // Try GitHub API with the resolved branch
         let apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}?ref=${branch}`;
         let resp = await fetch(apiUrl, { headers });
 
-        // If 404, the branch might be wrong — auto-detect default branch from repo metadata
+        // If 404, try the other common branch name
         if (!resp.ok && resp.status === 404) {
-          const repoHeaders = { "Accept": "application/vnd.github.v3+json", "User-Agent": "MindMappr-Agent" };
-          if (ghToken) repoHeaders["Authorization"] = `Bearer ${ghToken}`;
-          const repoResp = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers: repoHeaders });
-          if (repoResp.ok) {
-            const repoData = await repoResp.json();
-            const defaultBranch = repoData.default_branch || "main";
-            if (defaultBranch !== branch) {
-              // Retry with the correct default branch
-              branch = defaultBranch;
-              apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}?ref=${defaultBranch}`;
-              resp = await fetch(apiUrl, { headers });
-            }
+          const altBranch = branch === "main" ? "master" : "main";
+          const altUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}?ref=${altBranch}`;
+          const altResp = await fetch(altUrl, { headers });
+          if (altResp.ok) {
+            resp = altResp;
+            branch = altBranch;
+            apiUrl = altUrl;
           }
         }
 
@@ -2932,6 +2958,198 @@ async function executeTool(tool, params) {
       };
     } catch (e) {
       return { success: false, error: `Failed to load skill: ${e.message}` };
+    }
+  }
+
+  if (tool === "discover_skills") {
+    // Scan all user's GitHub repos for skill files and skill repos
+    const ghToken = getConnectionToken("github") || process.env.GITHUB_PAT || process.env.GITHUB_TOKEN || "";
+    const owner = params.owner || params.org || "midnghtsapphire";
+    const autoLoad = params.auto_load !== false; // default true
+    
+    try {
+      const headers = { "Accept": "application/vnd.github.v3+json", "User-Agent": "MindMappr-Agent" };
+      if (ghToken) headers["Authorization"] = `Bearer ${ghToken}`;
+      
+      // 1. List all repos for the user/org
+      const reposResp = await fetch(`https://api.github.com/users/${owner}/repos?per_page=100&sort=updated`, { headers });
+      if (!reposResp.ok) throw new Error(`Failed to list repos: ${reposResp.status}`);
+      const repos = await reposResp.json();
+      
+      // 2. Find repos that look like skill repositories
+      const skillKeywords = ["skill", "skills", "agent", "tool", "plugin", "expert"];
+      const skillRepos = [];
+      const otherReposWithSkills = [];
+      
+      for (const repo of repos) {
+        const nameLC = (repo.name || "").toLowerCase();
+        const descLC = (repo.description || "").toLowerCase();
+        const isSkillRepo = skillKeywords.some(k => nameLC.includes(k) || descLC.includes(k));
+        
+        if (isSkillRepo) {
+          // Get the file tree to find skill files
+          const branch = repo.default_branch || "main";
+          try {
+            const treeResp = await fetch(`https://api.github.com/repos/${repo.full_name}/git/trees/${branch}?recursive=1`, { headers });
+            if (treeResp.ok) {
+              const treeData = await treeResp.json();
+              const skillFiles = (treeData.tree || []).filter(f => 
+                f.type === "blob" && (
+                  f.path.endsWith(".skill.yml") || f.path.endsWith(".skill.yaml") ||
+                  (f.path.includes("skills/") && (f.path.endsWith(".py") || f.path.endsWith(".js") || f.path.endsWith(".md"))) ||
+                  f.path.endsWith(".skill.py") || f.path.endsWith(".skill.js")
+                )
+              ).map(f => f.path);
+              
+              skillRepos.push({
+                repo: repo.full_name,
+                branch: branch,
+                description: repo.description,
+                private: repo.private,
+                skill_files: skillFiles,
+                skill_count: skillFiles.length
+              });
+            }
+          } catch {}
+        }
+      }
+      
+      // 3. Auto-load skills if requested
+      let loaded = 0;
+      let failed = 0;
+      const loadResults = [];
+      
+      if (autoLoad) {
+        for (const sr of skillRepos) {
+          for (const filePath of sr.skill_files.slice(0, 50)) { // cap at 50 per repo
+            try {
+              const fileHeaders = { ...headers, "Accept": "application/vnd.github.v3.raw" };
+              const fileResp = await fetch(`https://api.github.com/repos/${sr.repo}/contents/${filePath}?ref=${sr.branch}`, { headers: fileHeaders });
+              if (!fileResp.ok) { failed++; continue; }
+              const fileContent = await fileResp.text();
+              
+              const ext = filePath.split(".").pop();
+              const skillName = filePath.split("/").pop().replace(/\.skill\.(yml|yaml|py|js|md)$/, "").replace(/\.(py|js|md|yml|yaml)$/, "");
+              const skillId = skillName.toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+              let detectedType = ext === "yml" || ext === "yaml" ? "yaml" : ext === "py" ? "python" : ext === "js" ? "javascript" : "markdown";
+              
+              // Store in DB
+              db.prepare(`INSERT OR REPLACE INTO skills (id, name, description, category, source, version, implementation_type, implementation_content, loaded, loaded_at, enabled)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), 1)`
+              ).run(skillId, skillName, `Auto-loaded from ${sr.repo}`, "Auto-Discovered", sr.repo, "1.0.0", detectedType, fileContent);
+              
+              // Load into memory
+              loadedSkills.set(skillId, {
+                id: skillId, name: skillName, type: detectedType,
+                content: fileContent, url: `${sr.repo}/${filePath}`,
+                loadedAt: new Date().toISOString()
+              });
+              loaded++;
+              loadResults.push({ skill: skillName, repo: sr.repo, path: filePath, status: "loaded" });
+            } catch (e) {
+              failed++;
+              loadResults.push({ skill: filePath, repo: sr.repo, status: "failed", error: e.message });
+            }
+          }
+        }
+      }
+      
+      return {
+        success: true,
+        owner: owner,
+        total_repos_scanned: repos.length,
+        skill_repos_found: skillRepos.length,
+        skill_repos: skillRepos.map(r => ({ repo: r.repo, skills: r.skill_count, branch: r.branch, private: r.private })),
+        auto_loaded: autoLoad,
+        loaded_count: loaded,
+        failed_count: failed,
+        load_results: loadResults.slice(0, 20), // cap output
+        message: `Scanned ${repos.length} repos for ${owner}. Found ${skillRepos.length} skill repo(s) with ${skillRepos.reduce((s,r) => s + r.skill_count, 0)} skill files total. ${autoLoad ? `Auto-loaded ${loaded} skills (${failed} failed).` : "Set auto_load:true to load them."}`
+      };
+    } catch (e) {
+      return { success: false, error: `Skill discovery failed: ${e.message}` };
+    }
+  }
+
+  if (tool === "scan_repo_skills") {
+    // Scan a specific repo for skill files and optionally load them
+    const repoName = params.repo || params.repository || "";
+    const autoLoad = params.auto_load !== false;
+    const ghToken = getConnectionToken("github") || process.env.GITHUB_PAT || process.env.GITHUB_TOKEN || "";
+    
+    if (!repoName) return { success: false, error: "Please provide a repo name (e.g. midnghtsapphire/revvel-skills-vault)" };
+    
+    try {
+      const headers = { "Accept": "application/vnd.github.v3+json", "User-Agent": "MindMappr-Agent" };
+      if (ghToken) headers["Authorization"] = `Bearer ${ghToken}`;
+      
+      // Get repo info for default branch
+      const repoResp = await fetch(`https://api.github.com/repos/${repoName}`, { headers });
+      if (!repoResp.ok) throw new Error(`Repo not found: ${repoResp.status}`);
+      const repoData = await repoResp.json();
+      const branch = repoData.default_branch || "main";
+      
+      // Get full file tree
+      const treeResp = await fetch(`https://api.github.com/repos/${repoName}/git/trees/${branch}?recursive=1`, { headers });
+      if (!treeResp.ok) throw new Error(`Failed to read repo tree: ${treeResp.status}`);
+      const treeData = await treeResp.json();
+      
+      const skillFiles = (treeData.tree || []).filter(f => 
+        f.type === "blob" && (
+          f.path.endsWith(".skill.yml") || f.path.endsWith(".skill.yaml") ||
+          f.path.endsWith(".skill.py") || f.path.endsWith(".skill.js") ||
+          (f.path.includes("skills/") && (f.path.endsWith(".py") || f.path.endsWith(".js") || f.path.endsWith(".md") || f.path.endsWith(".yml"))) ||
+          f.path.match(/^skills\/[^/]+\.py$/)
+        )
+      ).map(f => f.path);
+      
+      let loaded = 0, failed = 0;
+      const loadResults = [];
+      
+      if (autoLoad && skillFiles.length > 0) {
+        const fileHeaders = { ...headers, "Accept": "application/vnd.github.v3.raw" };
+        for (const filePath of skillFiles.slice(0, 100)) {
+          try {
+            const fileResp = await fetch(`https://api.github.com/repos/${repoName}/contents/${filePath}?ref=${branch}`, { headers: fileHeaders });
+            if (!fileResp.ok) { failed++; continue; }
+            const fileContent = await fileResp.text();
+            
+            const ext = filePath.split(".").pop();
+            const skillName = filePath.split("/").pop().replace(/\.skill\.(yml|yaml|py|js|md)$/, "").replace(/\.(py|js|md|yml|yaml)$/, "");
+            const skillId = skillName.toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+            let detectedType = ext === "yml" || ext === "yaml" ? "yaml" : ext === "py" ? "python" : ext === "js" ? "javascript" : "markdown";
+            
+            db.prepare(`INSERT OR REPLACE INTO skills (id, name, description, category, source, version, implementation_type, implementation_content, loaded, loaded_at, enabled)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), 1)`
+            ).run(skillId, skillName, `From ${repoName}`, "Repo Scan", repoName, "1.0.0", detectedType, fileContent);
+            
+            loadedSkills.set(skillId, {
+              id: skillId, name: skillName, type: detectedType,
+              content: fileContent, url: `${repoName}/${filePath}`,
+              loadedAt: new Date().toISOString()
+            });
+            loaded++;
+            loadResults.push({ skill: skillName, path: filePath, status: "loaded" });
+          } catch (e) {
+            failed++;
+            loadResults.push({ skill: filePath, status: "failed", error: e.message });
+          }
+        }
+      }
+      
+      return {
+        success: true,
+        repo: repoName,
+        branch: branch,
+        skill_files_found: skillFiles.length,
+        all_skill_files: skillFiles,
+        loaded_count: loaded,
+        failed_count: failed,
+        load_results: loadResults.slice(0, 30),
+        message: `Found ${skillFiles.length} skill files in ${repoName} (branch: ${branch}). ${autoLoad ? `Loaded ${loaded}, failed ${failed}.` : "Set auto_load:true to load them."}`
+      };
+    } catch (e) {
+      return { success: false, error: `Repo scan failed: ${e.message}` };
     }
   }
 
@@ -3624,13 +3842,13 @@ app.get("/api/health", (_, res) => {
   res.json({
     status: "ok",
     service: "MindMappr Agent v8.5 — Command Center + Content Studio + Activity Window + Rex Tools + Google Workspace + Legal + Stripe",
-    version: "8.8.1",
+    version: "8.9.0",
     features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections", "connection_validation", "telegram_bot", "discord_bot", "openclaw_skills_hub", "web_search", "discord_channel_mgmt", "google_calendar", "stripe_integration", "legal_agent", "auto_connect"],
     skillsCount: db.prepare("SELECT COUNT(*) as c FROM skills WHERE enabled = 1").get().c,
     skillsSources: db.prepare("SELECT source, COUNT(*) as count FROM skills WHERE enabled = 1 GROUP BY source").all(),
     agents: Object.keys(getAllAgentDefinitions()),
     ts: new Date().toISOString(),
-    tools: ["elevenlabs_tts", "generate_image", "create_video", "create_pdf", "create_real_pdf", "create_spreadsheet", "send_email", "read_email", "upload_to_drive", "create_google_doc", "create_google_sheet", "fill_pdf", "run_python", "web_scrape", "create_csv", "create_html", "send_slack", "web_search", "discord_create_channel", "discord_list_channels", "discord_delete_channel", "discord_send_message", "discord_create_role", "discord_list_roles", "create_calendar_event", "stripe_list_customers", "stripe_list_payments", "stripe_create_invoice", "load_skill", "list_skills", "execute_skill", "unload_skill", "save_memory", "memory_search", "read_memory"],
+    tools: ["elevenlabs_tts", "generate_image", "create_video", "create_pdf", "create_real_pdf", "create_spreadsheet", "send_email", "read_email", "upload_to_drive", "create_google_doc", "create_google_sheet", "fill_pdf", "run_python", "web_scrape", "create_csv", "create_html", "send_slack", "web_search", "discord_create_channel", "discord_list_channels", "discord_delete_channel", "discord_send_message", "discord_create_role", "discord_list_roles", "create_calendar_event", "stripe_list_customers", "stripe_list_payments", "stripe_create_invoice", "load_skill", "list_skills", "execute_skill", "unload_skill", "save_memory", "memory_search", "read_memory", "discover_skills", "scan_repo_skills"],
     rexTools: Object.keys(TOOL_REGISTRY),
     llmConfigured: !!(LLM_API_KEY),
     telegramConfigured: !!(TELEGRAM_BOT_TOKEN),

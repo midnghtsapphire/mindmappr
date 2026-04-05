@@ -703,6 +703,18 @@ export const EXTRA_TOOLS = {
     params: ["target"],
     example: 'TOOL:read_memory:{"target":"memory"}',
   },
+  discover_skills: {
+    category: "Skills",
+    description: "Scan ALL GitHub repos for the user/org and find skill repositories. Auto-discovers repos with 'skill', 'agent', 'tool', 'plugin', 'expert' in the name, scans them for skill files (.py, .js, .yml, .md), and auto-loads them all. Use when user says 'find my skills' or 'load all skills'.",
+    params: ["owner", "auto_load"],
+    example: 'TOOL:discover_skills:{"owner":"midnghtsapphire","auto_load":true}',
+  },
+  scan_repo_skills: {
+    category: "Skills",
+    description: "Scan a specific GitHub repo for skill files and load them. Use when user points to a specific repo.",
+    params: ["repo", "auto_load"],
+    example: 'TOOL:scan_repo_skills:{"repo":"midnghtsapphire/revvel-skills-vault","auto_load":true}',
+  },
 };
 
 /**
