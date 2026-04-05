@@ -239,9 +239,30 @@ db.exec(`
     openclaw_path TEXT,
     user_invocable INTEGER DEFAULT 1,
     file_count INTEGER DEFAULT 0,
+    implementation_type TEXT DEFAULT 'markdown',
+    implementation_content TEXT,
+    loaded INTEGER DEFAULT 0,
+    loaded_at TEXT,
     created_at TEXT DEFAULT (datetime('now'))
   );
 `);
+
+// Migrate existing skills table to add new columns
+try {
+  db.exec(`ALTER TABLE skills ADD COLUMN implementation_type TEXT DEFAULT 'markdown'`);
+} catch {} // column may already exist
+try {
+  db.exec(`ALTER TABLE skills ADD COLUMN implementation_content TEXT`);
+} catch {}
+try {
+  db.exec(`ALTER TABLE skills ADD COLUMN loaded INTEGER DEFAULT 0`);
+} catch {}
+try {
+  db.exec(`ALTER TABLE skills ADD COLUMN loaded_at TEXT`);
+} catch {}
+
+// ── In-memory loaded skills registry (for fast execution) ─────────────────
+const loadedSkills = new Map();
 
 // Seed skills from catalog JSON on startup (upsert — always sync from catalog)
 try {
@@ -743,6 +764,10 @@ Available tools:
 - stripe_create_invoice: {"customer_id":"...","items":[...]} — create invoice
 - run_python: {"code":"..."} — run Python code
 - create_csv: {"filename":"...","headers":[...],"rows":[...]} — create CSV
+- load_skill: {"url":"github.com/...","auto_register":true} — load a skill from GitHub
+- list_skills: {"loaded_only":true} — list available skills
+- execute_skill: {"skill_id":"...","input":"..."} — execute a loaded skill
+- unload_skill: {"skill_id":"..."} — unload a skill
 Also has access to all Rex tools: github_list_repos, github_create_repo, do_list_droplets, llm_code_review, etc.
 RULES:
 1. When asked to DO something, USE TOOLS — don't just explain
@@ -1418,6 +1443,10 @@ RULES:
    - create_csv: params: {filename, headers, rows} — creates a CSV file
    - create_html: params: {filename, html} — saves an HTML file
    - send_slack: params: {message, channel?} — sends a Slack message (if connected)
+   - load_skill: params: {url, skill_type?, auto_register?} — load a skill from GitHub or URL (.py, .js, .yml, .md)
+   - list_skills: params: {category?, loaded_only?, query?} — list available skills
+   - execute_skill: params: {skill_id, input?} — execute a loaded skill
+   - unload_skill: params: {skill_id} — unload a skill from memory
 5. MULTI-STEP TASKS: For complex requests that need multiple tools, output a plan like this:
    <task_plan>[{"step":1,"tool":"elevenlabs_tts","params":{...},"description":"Generate voiceover"},{"step":2,"tool":"generate_image","params":{...},"description":"Create background image"},{"step":3,"tool":"create_video","params":{"audio_file":"{{step1.file}}","image_file":"{{step2.file}}"},"description":"Combine into video"}]</task_plan>
 6. After a tool runs successfully, give a warm 1-2 sentence response saying the file is ready. No filenames, no code, no technical details.
@@ -2555,6 +2584,222 @@ async function executeTool(tool, params) {
     }, { retries: 2, baseDelay: 1000, label: "DuckDuckGo Search" });
   }
 
+  // ── Skill Management Tools ──────────────────────────────────────────────
+  if (tool === "load_skill") {
+    const url = params.url || "";
+    const skillType = params.skill_type || "auto";
+    const autoRegister = params.auto_register !== false;
+    if (!url) return { success: false, error: "Please provide a URL to the skill file." };
+
+    try {
+      // Support GitHub URLs — convert to raw content URL
+      let rawUrl = url;
+      if (url.includes("github.com") && !url.includes("raw.githubusercontent.com")) {
+        rawUrl = url
+          .replace("github.com", "raw.githubusercontent.com")
+          .replace("/blob/", "/");
+      }
+
+      // Fetch the skill content
+      const resp = await fetch(rawUrl);
+      if (!resp.ok) throw new Error(`Failed to fetch skill: ${resp.status} ${resp.statusText}`);
+      const content = await resp.text();
+
+      // Detect skill type
+      let detectedType = skillType;
+      if (skillType === "auto") {
+        if (url.endsWith(".py")) detectedType = "python";
+        else if (url.endsWith(".js") || url.endsWith(".mjs")) detectedType = "javascript";
+        else if (url.endsWith(".yml") || url.endsWith(".yaml")) detectedType = "yaml_skill";
+        else if (url.endsWith(".md")) detectedType = "markdown";
+        else if (url.endsWith(".json")) detectedType = "json";
+        else detectedType = "markdown";
+      }
+
+      // Parse skill metadata from YAML skill files
+      let skillName = basename(url).replace(/\.[^.]+$/, "");
+      let skillDesc = `Loaded from ${url}`;
+      let skillCategory = "Custom";
+      let skillTags = [];
+      let skillVersion = "1.0.0";
+
+      if (detectedType === "yaml_skill" && content.includes("name:")) {
+        // Parse YAML-like skill file
+        const nameMatch = content.match(/^name:\s*(.+)$/m);
+        const descMatch = content.match(/^description:\s*['"]?(.+?)['"]?$/m);
+        const catMatch = content.match(/^\s*category:\s*(.+)$/m);
+        const verMatch = content.match(/^version:\s*(.+)$/m);
+        if (nameMatch) skillName = nameMatch[1].trim();
+        if (descMatch) skillDesc = descMatch[1].trim();
+        if (catMatch) skillCategory = catMatch[1].trim();
+        if (verMatch) skillVersion = verMatch[1].trim();
+        // Extract implementation content from YAML
+        const implMatch = content.match(/implementation:[\s\S]*?content:\s*["']([\s\S]*?)["']\s*$/m);
+        // For YAML skills, the whole file IS the skill
+      }
+
+      const skillId = skillName.toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+
+      // Store in DB
+      db.prepare(
+        `INSERT INTO skills (id, name, description, category, tags, source, version, implementation_type, implementation_content, loaded, loaded_at, enabled)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), 1)
+         ON CONFLICT(id) DO UPDATE SET
+           implementation_content = excluded.implementation_content,
+           implementation_type = excluded.implementation_type,
+           loaded = 1,
+           loaded_at = datetime('now'),
+           enabled = 1`
+      ).run(skillId, skillName, skillDesc, skillCategory, JSON.stringify(skillTags), url, skillVersion, detectedType, content);
+
+      // Register in memory for execution
+      if (autoRegister) {
+        loadedSkills.set(skillId, {
+          id: skillId,
+          name: skillName,
+          type: detectedType,
+          content: content,
+          url: url,
+          loadedAt: new Date().toISOString()
+        });
+      }
+
+      return {
+        success: true,
+        skill_id: skillId,
+        name: skillName,
+        type: detectedType,
+        size: content.length,
+        registered: autoRegister,
+        message: `Skill "${skillName}" loaded successfully (${detectedType}, ${Math.round(content.length/1024)}KB). ${autoRegister ? "Auto-registered and ready to execute." : "Stored but not auto-registered."}`
+      };
+    } catch (e) {
+      return { success: false, error: `Failed to load skill: ${e.message}` };
+    }
+  }
+
+  if (tool === "list_skills") {
+    const category = params.category || null;
+    const loadedOnly = params.loaded_only || false;
+    const query = params.query || null;
+    try {
+      let sql = "SELECT id, name, description, category, tags, source, version, implementation_type, loaded, loaded_at, enabled FROM skills WHERE enabled = 1";
+      const sqlParams = [];
+      if (category) { sql += " AND category = ?"; sqlParams.push(category); }
+      if (loadedOnly) { sql += " AND loaded = 1"; }
+      if (query) { sql += " AND (name LIKE ? OR description LIKE ?)"; sqlParams.push(`%${query}%`, `%${query}%`); }
+      sql += " ORDER BY loaded DESC, name ASC LIMIT 50";
+      const skills = db.prepare(sql).all(...sqlParams);
+      const loadedCount = db.prepare("SELECT COUNT(*) as c FROM skills WHERE loaded = 1 AND enabled = 1").get().c;
+      const totalCount = db.prepare("SELECT COUNT(*) as c FROM skills WHERE enabled = 1").get().c;
+      return {
+        success: true,
+        skills: skills.map(s => ({
+          id: s.id,
+          name: s.name,
+          description: s.description,
+          category: s.category,
+          type: s.implementation_type,
+          loaded: !!s.loaded,
+          loaded_at: s.loaded_at,
+          in_memory: loadedSkills.has(s.id),
+          source: s.source,
+          version: s.version
+        })),
+        loaded_count: loadedCount,
+        total_count: totalCount,
+        message: `${skills.length} skills found (${loadedCount} loaded, ${totalCount} total)`
+      };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  }
+
+  if (tool === "execute_skill") {
+    const skillId = (params.skill_id || params.name || "").toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+    const input = params.input || params.prompt || "";
+    if (!skillId) return { success: false, error: "Please provide a skill_id or name." };
+
+    // Check in-memory first
+    let skill = loadedSkills.get(skillId);
+    if (!skill) {
+      // Try loading from DB
+      const dbSkill = db.prepare("SELECT * FROM skills WHERE id = ? AND enabled = 1").get(skillId);
+      if (!dbSkill || !dbSkill.implementation_content) {
+        return { success: false, error: `Skill "${skillId}" not found or not loaded. Use load_skill first.` };
+      }
+      skill = { id: dbSkill.id, name: dbSkill.name, type: dbSkill.implementation_type, content: dbSkill.implementation_content };
+      loadedSkills.set(skillId, skill);
+    }
+
+    try {
+      if (skill.type === "python") {
+        // Execute Python skill
+        const tmpFile = join(UPLOADS_DIR, `skill_${Date.now()}.py`);
+        writeFileSync(tmpFile, skill.content);
+        const { stdout, stderr } = await execAsync(`python3 "${tmpFile}" ${JSON.stringify(input)}`, { timeout: 30000 });
+        try { unlinkSync(tmpFile); } catch {}
+        return {
+          success: true,
+          skill_id: skillId,
+          output: stdout.trim(),
+          errors: stderr ? stderr.trim() : null,
+          message: `Skill "${skill.name}" executed successfully.`
+        };
+      } else if (skill.type === "javascript") {
+        // Execute JavaScript skill
+        const tmpFile = join(UPLOADS_DIR, `skill_${Date.now()}.mjs`);
+        writeFileSync(tmpFile, skill.content);
+        const { stdout, stderr } = await execAsync(`node "${tmpFile}" ${JSON.stringify(input)}`, { timeout: 30000 });
+        try { unlinkSync(tmpFile); } catch {}
+        return {
+          success: true,
+          skill_id: skillId,
+          output: stdout.trim(),
+          errors: stderr ? stderr.trim() : null,
+          message: `Skill "${skill.name}" executed successfully.`
+        };
+      } else if (skill.type === "markdown" || skill.type === "yaml_skill") {
+        // For markdown/YAML skills, inject the skill content as system context and call LLM
+        const llmKey = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || "";
+        if (!llmKey) return { success: false, error: "No LLM API key configured." };
+        const resp = await fetch(`${LLM_BASE_URL}/chat/completions`, {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${llmKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: LLM_MODEL,
+            messages: [
+              { role: "system", content: `You are an AI agent executing the following skill:\n\n${skill.content}\n\nFollow the skill instructions precisely. Execute the task the user describes.` },
+              { role: "user", content: input || "Execute this skill with default parameters." }
+            ],
+            max_tokens: 4000
+          })
+        });
+        if (!resp.ok) throw new Error(`LLM call failed: ${resp.status}`);
+        const data = await resp.json();
+        const reply = data.choices?.[0]?.message?.content || "No response from skill execution.";
+        return {
+          success: true,
+          skill_id: skillId,
+          output: reply,
+          message: `Skill "${skill.name}" executed via LLM.`
+        };
+      } else {
+        return { success: false, error: `Unsupported skill type: ${skill.type}` };
+      }
+    } catch (e) {
+      return { success: false, error: `Skill execution failed: ${e.message}` };
+    }
+  }
+
+  if (tool === "unload_skill") {
+    const skillId = (params.skill_id || params.name || "").toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+    if (!skillId) return { success: false, error: "Please provide a skill_id or name." };
+    loadedSkills.delete(skillId);
+    db.prepare("UPDATE skills SET loaded = 0, loaded_at = NULL WHERE id = ?").run(skillId);
+    return { success: true, skill_id: skillId, message: `Skill "${skillId}" unloaded from memory and marked as inactive.` };
+  }
+
   return { success: false, error: `I don't know that tool: ${tool}. Try asking in a different way.` };
 }
 
@@ -3122,13 +3367,13 @@ app.get("/api/health", (_, res) => {
   res.json({
     status: "ok",
     service: "MindMappr Agent v8.5 — Command Center + Content Studio + Activity Window + Rex Tools + Google Workspace + Legal + Stripe",
-    version: "8.6.0",
+    version: "8.7.0",
     features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections", "connection_validation", "telegram_bot", "discord_bot", "openclaw_skills_hub", "web_search", "discord_channel_mgmt", "google_calendar", "stripe_integration", "legal_agent", "auto_connect"],
     skillsCount: db.prepare("SELECT COUNT(*) as c FROM skills WHERE enabled = 1").get().c,
     skillsSources: db.prepare("SELECT source, COUNT(*) as count FROM skills WHERE enabled = 1 GROUP BY source").all(),
     agents: Object.keys(getAllAgentDefinitions()),
     ts: new Date().toISOString(),
-    tools: ["elevenlabs_tts", "generate_image", "create_video", "create_pdf", "create_real_pdf", "create_spreadsheet", "send_email", "read_email", "upload_to_drive", "create_google_doc", "create_google_sheet", "fill_pdf", "run_python", "web_scrape", "create_csv", "create_html", "send_slack", "web_search", "discord_create_channel", "discord_list_channels", "discord_delete_channel", "discord_send_message", "discord_create_role", "discord_list_roles", "create_calendar_event", "stripe_list_customers", "stripe_list_payments", "stripe_create_invoice"],
+    tools: ["elevenlabs_tts", "generate_image", "create_video", "create_pdf", "create_real_pdf", "create_spreadsheet", "send_email", "read_email", "upload_to_drive", "create_google_doc", "create_google_sheet", "fill_pdf", "run_python", "web_scrape", "create_csv", "create_html", "send_slack", "web_search", "discord_create_channel", "discord_list_channels", "discord_delete_channel", "discord_send_message", "discord_create_role", "discord_list_roles", "create_calendar_event", "stripe_list_customers", "stripe_list_payments", "stripe_create_invoice", "load_skill", "list_skills", "execute_skill", "unload_skill"],
     rexTools: Object.keys(TOOL_REGISTRY),
     llmConfigured: !!(LLM_API_KEY),
     telegramConfigured: !!(TELEGRAM_BOT_TOKEN),

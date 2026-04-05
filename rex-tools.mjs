@@ -640,6 +640,30 @@ export const EXTRA_TOOLS = {
     params: ["customer_id", "items"],
     example: 'TOOL:stripe_create_invoice:{"customer_id":"cus_xxx","items":[{"description":"Consulting","amount":5000,"currency":"usd"}]}',
   },
+  load_skill: {
+    category: "Skills",
+    description: "Load a skill from GitHub or any URL. Supports .py, .js, .yml, .md files. Auto-detects type and registers for execution.",
+    params: ["url", "skill_type", "auto_register"],
+    example: 'TOOL:load_skill:{"url":"github.com/midnghtsapphire/revvel-skills-vault/blob/main/skills/custom/web_scraper.skill.yml","auto_register":true}',
+  },
+  list_skills: {
+    category: "Skills",
+    description: "List available skills. Filter by category, loaded status, or search query.",
+    params: ["category", "loaded_only", "query"],
+    example: 'TOOL:list_skills:{"loaded_only":true}',
+  },
+  execute_skill: {
+    category: "Skills",
+    description: "Execute a loaded skill by ID or name. Python/JS skills run directly. Markdown/YAML skills run via LLM with skill content as context.",
+    params: ["skill_id", "input"],
+    example: 'TOOL:execute_skill:{"skill_id":"web_scraper","input":"Scrape https://example.com"}',
+  },
+  unload_skill: {
+    category: "Skills",
+    description: "Unload a skill from memory and mark as inactive.",
+    params: ["skill_id"],
+    example: 'TOOL:unload_skill:{"skill_id":"web_scraper"}',
+  },
 };
 
 /**
