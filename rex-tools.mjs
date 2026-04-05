@@ -750,7 +750,7 @@ export function parseToolCalls(text) {
       const parts = trimmed.slice(5).split(":");
       const toolName = parts[0];
       const args = parts.slice(1).map(a => a.trim());
-      if (toolName && TOOL_REGISTRY[toolName]) {
+      if (toolName && (TOOL_REGISTRY[toolName] || EXTRA_TOOLS[toolName])) {
         results.push({ tool: toolName, args });
       }
     }

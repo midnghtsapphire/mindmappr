@@ -1044,12 +1044,22 @@ async function invokeAgent(agentName, userMessage, sessionId = null) {
           if (TOOL_REGISTRY[tc.tool]) {
             toolResult = await executeRexTool(tc.tool, tc.args);
           } else if (EXTRA_TOOLS[tc.tool]) {
-            // Parse JSON params from the first arg if it looks like JSON
+            // Parse params: try JSON first, then map positional args to declared param names
             let params = {};
+            const joinedArgs = tc.args.join(":");
             if (tc.args.length === 1 && tc.args[0].startsWith("{")) {
               try { params = JSON.parse(tc.args[0]); } catch { params = { input: tc.args[0] }; }
+            } else if (joinedArgs.startsWith("{")) {
+              try { params = JSON.parse(joinedArgs); } catch { params = { input: joinedArgs }; }
             } else if (tc.args.length > 0) {
-              try { params = JSON.parse(tc.args.join(":")); } catch { params = { input: tc.args.join(" ") }; }
+              // Map positional args to the tool's declared param names
+              const declaredParams = EXTRA_TOOLS[tc.tool].params || [];
+              for (let i = 0; i < tc.args.length && i < declaredParams.length; i++) {
+                const val = tc.args[i];
+                // Auto-convert 'true'/'false' to booleans
+                params[declaredParams[i]] = val === "true" ? true : val === "false" ? false : val;
+              }
+              if (Object.keys(params).length === 0) params = { input: tc.args.join(" ") };
             }
             toolResult = await executeTool(tc.tool, params);
           } else {
@@ -3842,7 +3852,7 @@ app.get("/api/health", (_, res) => {
   res.json({
     status: "ok",
     service: "MindMappr Agent v8.5 — Command Center + Content Studio + Activity Window + Rex Tools + Google Workspace + Legal + Stripe",
-    version: "8.9.1",
+    version: "9.0.0",
     features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections", "connection_validation", "telegram_bot", "discord_bot", "openclaw_skills_hub", "web_search", "discord_channel_mgmt", "google_calendar", "stripe_integration", "legal_agent", "auto_connect"],
     skillsCount: db.prepare("SELECT COUNT(*) as c FROM skills WHERE enabled = 1").get().c,
     skillsSources: db.prepare("SELECT source, COUNT(*) as count FROM skills WHERE enabled = 1 GROUP BY source").all(),
