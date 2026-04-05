@@ -14,6 +14,7 @@ import nodemailer from "nodemailer";
 import { initRexTools, executeTool as executeRexTool, parseToolCalls, getToolListForPrompt, TOOL_REGISTRY, EXTRA_TOOLS } from "./rex-tools.mjs";
 import { initDiscord, startDiscordBot, sendDiscordNotification, getDiscordStatus, disconnectDiscord, getDiscordClient } from "./discord-connector.mjs";
 import { ChannelType } from "discord.js";
+import { restoreFromGitHub, markDirty, markDbDirty, syncToGitHub, fullSync, startSyncTimer, stopSyncTimer, getSyncStatus } from "./github-sync.mjs";
 
 const execAsync = promisify(exec);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -26,6 +27,7 @@ const LLM_MODEL = process.env.LLM_MODEL || "anthropic/claude-sonnet-4";
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || "";
+const GITHUB_PAT = process.env.GITHUB_PAT || "";
 const UPLOADS_DIR = join(__dirname, "uploads");
 const DATA_DIR = join(__dirname, "data");
 
@@ -45,14 +47,17 @@ const USER_FILE = join(DATA_DIR, "user.md");
 if (!existsSync(MEMORY_FILE)) {
   writeFileSync(MEMORY_FILE, `# MindMappr Long-Term Memory\n\n## Core Knowledge\n- Owner: Audrey Evans (Revvel). GitHub: MIDNGHTSAPPHIRE. Company: GlowStarLabs.\n- Audrey is AuDHD, 60 years old, cancer survivor. Daughter is legally deaf.\n- Prefers warm, direct, accessible communication. No jargon.\n\n## Key Projects\n- MindMappr: AI agent management platform\n- OpenClaw: AI assistant and tooling platform\n- Revvel Email Organizer: AI-powered email processing\n- Neurooz: Neurodivergent-friendly technology\n\n## Preferences\n- FOSS first, GitHub first\n- Glassmorphism UI/UX\n- Auto-everything, no confirmation questions\n- Production-ready, one-iteration delivery\n\n---\n*Memory is append-only. New entries go below this line.*\n\n`);
   console.log("[Memory] Created MEMORY.md");
+  markDirty(MEMORY_FILE);
 }
 if (!existsSync(SOUL_FILE)) {
   writeFileSync(SOUL_FILE, `# MindMappr Agent Soul\n\n## Voice & Personality\n- Warm, direct, accessible\n- No corporate fluff or hedging\n- Action-oriented: do first, explain after\n- Inclusive and neurodivergent-friendly\n\n## Core Beliefs\n- Technology should empower diverse users\n- Privacy and ethics are non-negotiable\n- Open-source enables innovation\n- Every line of code is an opportunity to make technology more inclusive\n`);
   console.log("[Memory] Created soul.md");
+  markDirty(SOUL_FILE);
 }
 if (!existsSync(USER_FILE)) {
   writeFileSync(USER_FILE, `# User Profile: Audrey Evans (Revvel)\n\n## Identity\n- Name: Audrey Evans\n- Aliases: Revvel, A, Freedom Angel\n- GitHub: MIDNGHTSAPPHIRE\n- Company: GlowStarLabs\n\n## Communication Style\n- Very detailed replies\n- Authentic tone, no guardrails\n- Deep-researched with citations\n- No unnecessary confirmation questions\n\n## Technical Preferences\n- FOSS first\n- Auto-deploy everything\n- OpenRouter for LLM routing\n- Glassmorphism UI/UX\n`);
   console.log("[Memory] Created user.md");
+  markDirty(USER_FILE);
 }
 
 // Helper: get today's daily note path
@@ -68,9 +73,9 @@ function getDailyNotePath() {
 // ══════════════════════════════════════════════════════════════════════════════
 function loadData(n) { try { return JSON.parse(readFileSync(join(DATA_DIR, n + ".json"), "utf8")); } catch { return []; } }
 function loadObj(n)  { try { return JSON.parse(readFileSync(join(DATA_DIR, n + ".json"), "utf8")); } catch { return {}; } }
-function saveData(n, d) { writeFileSync(join(DATA_DIR, n + ".json"), JSON.stringify(d, null, 2)); }
+function saveData(n, d) { const fp = join(DATA_DIR, n + ".json"); writeFileSync(fp, JSON.stringify(d, null, 2)); markDirty(fp); }
 function getKey(name) { return loadObj("api_keys")[name] || null; }
-function storeKey(name, key) { const k = loadObj("api_keys"); k[name] = key; writeFileSync(join(DATA_DIR, "api_keys.json"), JSON.stringify(k, null, 2)); }
+function storeKey(name, key) { const k = loadObj("api_keys"); k[name] = key; const fp = join(DATA_DIR, "api_keys.json"); writeFileSync(fp, JSON.stringify(k, null, 2)); markDirty(fp); }
 function saveMeta(name, size, type, creator) {
   const m = loadObj("file_meta");
   m[name] = { name, size, type, creator, createdAt: new Date().toISOString() };
@@ -111,9 +116,23 @@ function friendlyError(err, label) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ── v5: SQLite Long-Term Memory ─────────────────────────────────────────────
+// ── GitHub Data Restore (runs BEFORE DB init) ──────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 const DB_PATH = join(DATA_DIR, "mindmappr.db");
+try {
+  if (GITHUB_PAT) {
+    console.log("[DataSync] Restoring data from GitHub before DB init...");
+    await restoreFromGitHub(DATA_DIR, DB_PATH, GITHUB_PAT);
+  } else {
+    console.log("[DataSync] No GITHUB_PAT set — skipping GitHub restore");
+  }
+} catch (err) {
+  console.error("[DataSync] Restore failed (continuing with local data):", err.message);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── v5: SQLite Long-Term Memory ─────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
 const db = new Database(DB_PATH);
 db.pragma("journal_mode = WAL");
 
@@ -642,6 +661,8 @@ function storeMemoryFromConversation(sessionId, userMsg, assistantReply) {
     const ts = new Date().toISOString().split("T")[1].split(".")[0];
     const summary = `[${ts}] User: ${userMsg.slice(0, 120)}${userMsg.length > 120 ? '...' : ''} | Agent: ${assistantReply.slice(0, 120)}${assistantReply.length > 120 ? '...' : ''}\n`;
     appendFileSync(dailyPath, summary);
+    markDirty(dailyPath);
+    markDbDirty();
   } catch (e) {
     console.error("[Memory] Store error:", e.message);
   }
@@ -1488,6 +1509,7 @@ app.get("/api/google/callback", async (req, res) => {
     db.prepare(
       "INSERT OR REPLACE INTO connections (id, service_name, token, account_name, connected_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))"
     ).run("google_calendar", "Google Calendar", JSON.stringify(googleData), "Google Calendar");
+    markDbDirty();
     console.log("[Google OAuth] Successfully connected Google Workspace");
     res.redirect("/mindmappr?connected=google");
   } catch (err) {
@@ -2712,6 +2734,7 @@ async function executeTool(tool, params) {
       if (target === "memory" || target === "long_term") {
         // Append to MEMORY.md
         appendFileSync(MEMORY_FILE, entry);
+        markDirty(MEMORY_FILE);
         return { success: true, target: "MEMORY.md", message: `Saved to long-term memory: "${content.slice(0, 100)}..."` };
       } else if (target === "daily") {
         // Append to today's daily note
@@ -2720,12 +2743,15 @@ async function executeTool(tool, params) {
           writeFileSync(dailyPath, `# Daily Notes — ${new Date().toISOString().split("T")[0]}\n\n`);
         }
         appendFileSync(dailyPath, entry);
+        markDirty(dailyPath);
         return { success: true, target: dailyPath, message: `Saved to today's daily notes.` };
       } else if (target === "soul") {
         appendFileSync(SOUL_FILE, `\n${content}\n`);
+        markDirty(SOUL_FILE);
         return { success: true, target: "soul.md", message: `Updated soul/personality.` };
       } else if (target === "user") {
         appendFileSync(USER_FILE, `\n${content}\n`);
+        markDirty(USER_FILE);
         return { success: true, target: "user.md", message: `Updated user profile.` };
       }
       return { success: false, error: `Unknown target: ${target}. Use: memory, daily, soul, or user.` };
@@ -2956,6 +2982,8 @@ async function executeTool(tool, params) {
            loaded_at = datetime('now'),
            enabled = 1`
       ).run(skillId, skillName, skillDesc, skillCategory, JSON.stringify(skillTags), url, skillVersion, detectedType, content);
+
+      markDbDirty();
 
       // Register in memory for execution
       if (autoRegister) {
@@ -3432,6 +3460,7 @@ RULES:
     const ins = db.prepare(
       "INSERT INTO content_studio_posts (title, content, platform, content_type, tags, status) VALUES (?, ?, ?, ?, ?, 'draft')"
     ).run(topic, result, platform || 'general', contentType || 'post', keywords || '');
+    markDbDirty();
 
     res.json({
       success: true,
@@ -3851,6 +3880,7 @@ app.patch("/api/content-studio/posts/:id", (req, res) => {
     if (status === 'published') updates.push("published_at = datetime('now')");
     params.push(id);
     db.prepare(`UPDATE content_studio_posts SET ${updates.join(", ")} WHERE id = ?`).run(...params);
+    markDbDirty();
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
@@ -3860,6 +3890,7 @@ app.patch("/api/content-studio/posts/:id", (req, res) => {
 app.delete("/api/content-studio/posts/:id", (req, res) => {
   try {
     db.prepare("DELETE FROM content_studio_posts WHERE id = ?").run(parseInt(req.params.id));
+    markDbDirty();
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
@@ -3873,10 +3904,9 @@ app.delete("/api/content-studio/posts/:id", (req, res) => {
 app.get("/api/health", (_, res) => {
   const connRows = db.prepare("SELECT id FROM connections").all().map(r => r.id);
   res.json({
-    status: "ok",
-    service: "MindMappr Agent v8.5 — Command Center + Content Studio + Activity Window + Rex Tools + Google Workspace + Legal + Stripe",
-    version: "9.3.0",
-    features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections", "connection_validation", "telegram_bot", "discord_bot", "openclaw_skills_hub", "web_search", "discord_channel_mgmt", "google_calendar", "stripe_integration", "legal_agent", "auto_connect"],
+    status: "ok",    service: "MindMappr Agent v9.4 \u2014 Command Center + Content Studio + Activity Window + Rex Tools + Google Workspace + Legal + Stripe + GitHub Data Sync",
+    version: "9.4.0", features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections", "connection_validation", "telegram_bot", "discord_bot", "openclaw_skills_hub", "web_search", "discord_channel_mgmt", "google_calendar", "stripe_integration", "legal_agent", "auto_connect", "github_data_sync"],
+    dataSyncStatus: getSyncStatus(),
     skillsCount: db.prepare("SELECT COUNT(*) as c FROM skills WHERE enabled = 1").get().c,
     skillsSources: db.prepare("SELECT source, COUNT(*) as count FROM skills WHERE enabled = 1 GROUP BY source").all(),
     agents: Object.keys(getAllAgentDefinitions()),
@@ -3981,6 +4011,7 @@ app.post("/api/agents", (req, res) => {
       "INSERT INTO custom_agents (id, name, model, role, description, icon, color, system_prompt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     ).run(id, name, model || 'anthropic/claude-sonnet-4', role, description || role, icon || '\u{1F916}', color || '#6c5ce7', systemPrompt);
     agentState[id] = { status: "online", lastActivity: new Date().toISOString(), taskCount: 0, totalCost: 0 };
+    markDbDirty();
     res.json({ success: true, data: { id, name, model: model || 'anthropic/claude-sonnet-4', role, description: description || role, icon: icon || '\u{1F916}', color: color || '#6c5ce7' } });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
@@ -4002,6 +4033,7 @@ app.put("/api/agents/:id", (req, res) => {
       description || existing.description, icon || existing.icon, color || existing.color,
       systemPrompt || existing.system_prompt, agentId
     );
+    markDbDirty();
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
@@ -4016,6 +4048,7 @@ app.delete("/api/agents/:id", (req, res) => {
     const result = db.prepare("DELETE FROM custom_agents WHERE id = ?").run(agentId);
     if (result.changes === 0) return res.status(404).json({ success: false, error: "Agent not found" });
     delete agentState[agentId];
+    markDbDirty();
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
@@ -4232,6 +4265,7 @@ app.post("/api/chat", async (req, res) => {
     history.push({ role: "user", content: userContent }, { role: "assistant", content: reply });
     if (history.length > 60) history.splice(0, history.length - 60);
     writeFileSync(hf, JSON.stringify(history));
+    markDirty(hf);
 
     // v5: Store memory
     storeMemoryFromConversation(sid, userContent, reply);
@@ -4509,6 +4543,7 @@ app.post("/api/connections/connect", async (req, res) => {
     db.prepare(
       "INSERT OR REPLACE INTO connections (id, service_name, token, account_name, connected_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))"
     ).run(id, serviceName, token, resolvedName);
+    markDbDirty();
     console.log(`[Connections] ${id} connected as ${resolvedName}`);
     res.json({ success: true, data: { id, connected: true, accountName: resolvedName } });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
@@ -4518,6 +4553,7 @@ app.post("/api/connections/disconnect", (req, res) => {
   try {
     const { id } = req.body;
     db.prepare("DELETE FROM connections WHERE id = ?").run(id);
+    markDbDirty();
     res.json({ success: true });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
@@ -4559,6 +4595,7 @@ app.post("/api/memory/facts", (req, res) => {
     const { category, content } = req.body;
     if (!category || !content) return res.status(400).json({ success: false, error: "category and content required" });
     db.prepare("INSERT INTO facts (category, content, source) VALUES (?, ?, 'manual')").run(category, content);
+    markDbDirty();
     res.json({ success: true });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
@@ -4566,6 +4603,7 @@ app.post("/api/memory/facts", (req, res) => {
 app.delete("/api/memory/facts/:id", (req, res) => {
   try {
     db.prepare("DELETE FROM facts WHERE id = ?").run(req.params.id);
+    markDbDirty();
     res.json({ success: true });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
@@ -4582,6 +4620,7 @@ app.post("/api/memory/preferences", (req, res) => {
     const { key, value } = req.body;
     if (!key || !value) return res.status(400).json({ success: false, error: "key and value required" });
     db.prepare("INSERT OR REPLACE INTO user_preferences (key, value, updated_at) VALUES (?, ?, datetime('now'))").run(key, value);
+    markDbDirty();
     res.json({ success: true });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
@@ -4661,6 +4700,7 @@ app.post("/api/schedule", (req, res) => {
     const result = db.prepare("INSERT INTO scheduled_tasks (name, cron_expression, task_type, task_config, assigned_agent) VALUES (?, ?, ?, ?, ?)").run(name, cron_expression, task_type, configStr, agentStr);
     const task = db.prepare("SELECT * FROM scheduled_tasks WHERE id = ?").get(result.lastInsertRowid);
     startCronJob(task);
+    markDbDirty();
     res.json({ success: true, data: task });
   } catch (e) { res.status(500).json({ success: false, error: friendlyError(e, "Scheduler") }); }
 });
@@ -4680,6 +4720,7 @@ app.delete("/api/schedule/:id", (req, res) => {
       activeCrons.delete(id);
     }
     db.prepare("DELETE FROM scheduled_tasks WHERE id = ?").run(id);
+    markDbDirty();
     res.json({ success: true });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
@@ -4696,6 +4737,7 @@ app.patch("/api/schedule/:id", (req, res) => {
       activeCrons.get(id).stop();
       activeCrons.delete(id);
     }
+    markDbDirty();
     res.json({ success: true, data: task });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
@@ -4705,7 +4747,7 @@ app.patch("/api/schedule/:id", (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || ""; // Set GITHUB_TOKEN env var in your deployment platform
 
-async function ghFetch(url, opts = {}) {
+async function ghDeployFetch(url, opts = {}) {
   const res = await fetch(url, {
     ...opts,
     headers: {
@@ -4731,7 +4773,7 @@ app.get("/api/github/prs", async (req, res) => {
       return res.status(400).json({ success: false, error: "Missing or invalid 'repo' query param (expected OWNER/REPO)" });
     }
     const prs = await withRetry(
-      () => ghFetch(`https://api.github.com/repos/${repo}/pulls?state=open&sort=created&direction=desc&per_page=50`),
+      () => ghDeployFetch(`https://api.github.com/repos/${repo}/pulls?state=open&sort=created&direction=desc&per_page=50`),
       { label: "GitHub PR list" }
     );
     if (prs && prs.error) return res.status(502).json({ success: false, error: prs.error });
@@ -4758,7 +4800,7 @@ app.post("/api/github/merge-pr", async (req, res) => {
       return res.status(400).json({ success: false, error: "Missing 'repo' or 'prNumber' in request body" });
     }
     const result = await withRetry(
-      () => ghFetch(`https://api.github.com/repos/${repo}/pulls/${prNumber}/merge`, {
+      () => ghDeployFetch(`https://api.github.com/repos/${repo}/pulls/${prNumber}/merge`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ merge_method: "merge" }),
@@ -4874,7 +4916,32 @@ app.post("/api/tools/execute", async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ── Serve frontend SPA ────────────────────────────────────────────────────
+// ── Data Sync API ───────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+app.post("/api/sync", async (req, res) => {
+  try {
+    const { full } = req.body || {};
+    let result;
+    if (full) {
+      result = await fullSync();
+    } else {
+      // Force sync of any pending changes + DB
+      markDbDirty();
+      result = await syncToGitHub(true);
+    }
+    res.json({ success: true, data: result });
+  } catch (e) {
+    console.error("[DataSync] Manual sync error:", e.message);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.get("/api/sync/status", (_, res) => {
+  res.json({ success: true, data: getSyncStatus() });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Serve frontend SPA ──────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 app.get("/mindmappr", (_, res) => res.sendFile(join(__dirname, "public", "index.html")));
 app.get("/mindmappr/*", (req, res) => {
@@ -4887,9 +4954,13 @@ app.get("/mindmappr/*", (req, res) => {
 // ── Start ───────────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 app.listen(PORT, () => {
-  console.log(`MindMappr Agent v8.5 \u2014 Command Center + Content Studio + Activity Window + Rex Tools + Legal + Stripe running on port ${PORT}`);
+  console.log(`MindMappr Agent v9.4 \u2014 Command Center + Content Studio + Activity Window + Rex Tools + Legal + Stripe + GitHub Data Sync running on port ${PORT}`);
   console.log(`Agents online: ${Object.values(getAllAgentDefinitions()).map(a => a.name).join(", ")}`);
   loadAndStartSchedules();
+
+  // Start GitHub data sync timer (debounced, every 30s)
+  startSyncTimer();
+
   // Set up Telegram webhook after a short delay to ensure server is ready
   setTimeout(setupTelegramWebhook, 5000);
 
@@ -4903,6 +4974,18 @@ app.listen(PORT, () => {
       }).catch(err => console.error("[Discord] Bot start error:", err.message));
     }, 3000);
   } else {
-    console.log("[Discord] No bot token configured — add one in Connections tab or set DISCORD_BOT_TOKEN env var");
+    console.log("[Discord] No bot token configured \u2014 add one in Connections tab or set DISCORD_BOT_TOKEN env var");
+  }
+
+  // Do an initial full sync after startup settles (60s delay)
+  if (GITHUB_PAT) {
+    setTimeout(async () => {
+      try {
+        await fullSync();
+        console.log("[DataSync] Initial full sync completed");
+      } catch (err) {
+        console.error("[DataSync] Initial full sync error:", err.message);
+      }
+    }, 60000);
   }
 });

@@ -47,8 +47,8 @@ function parseDiscordAgentMention(content) {
     }
   }
 
-  // Default to Rex for general messages
-  return { agentName: "rex", cleanMessage: content };
+  // Default to MindMappr (telegram agent) for general messages — NOT Rex
+  return { agentName: "telegram", cleanMessage: content };
 }
 
 /**
@@ -128,7 +128,7 @@ export async function startDiscordBot(token) {
     console.log(`[Discord] Bot logged in as ${discordClient.user.tag}`);
     console.log(`[Discord] Serving ${discordClient.guilds.cache.size} server(s)`);
     if (logActivityFn) {
-      logActivityFn("rex", "Rex", "discord_connect", `Discord bot online as ${discordClient.user.tag}`);
+      logActivityFn("telegram", "MindMappr", "discord_connect", `Discord bot online as ${discordClient.user.tag}`);
     }
   });
 
@@ -154,9 +154,9 @@ export async function startDiscordBot(token) {
     if (!content) {
       const allDefs = getAllAgentDefsFn ? getAllAgentDefsFn() : {};
       const agentList = Object.entries(allDefs)
-        .map(([id, def]) => `${def.icon} **${def.name}** — ${def.role}`)
+        .map(([id, def]) => `${def.icon} **${def.name}** \u2014 ${def.role}`)
         .join("\n");
-      await message.reply(`Hey! I'm MindMappr. Here are the agents you can talk to:\n\n${agentList}\n\nJust mention me and say \`@Rex check status\` or \`@Generator write a blog post\`.`);
+      await message.reply(`Hey! I'm MindMappr Bot. Here are the agents you can talk to:\n\n${agentList}\n\nUse \`@AgentName message\` to talk to a specific agent (e.g. \`@Rex check status\`), or just talk to me directly!`);
       return;
     }
 

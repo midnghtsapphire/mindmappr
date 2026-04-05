@@ -1,6 +1,6 @@
 {
   "name": "mindmappr-web",
-  "version": "8.5.0",
+  "version": "9.4.0",
   "type": "module",
   "main": "server.mjs",
   "scripts": {
