@@ -125,10 +125,31 @@ export async function github_push_file(repo, path, content, message = "Update fi
   return { success: true, path: data.content?.path, sha: data.content?.sha, url: data.content?.html_url };
 }
 
-export async function github_get_file(repo, path, branch = "main") {
-  const data = await ghFetch(`https://api.github.com/repos/${repo}/contents/${path}?ref=${branch}`);
+export async function github_get_file(repo, path, branch = null) {
+  // Auto-detect default branch if not specified
+  if (!branch) {
+    try {
+      const repoData = await ghFetch(`https://api.github.com/repos/${repo}`);
+      branch = repoData.default_branch || "main";
+    } catch { branch = "main"; }
+  }
+  let data;
+  try {
+    data = await ghFetch(`https://api.github.com/repos/${repo}/contents/${path}?ref=${branch}`);
+  } catch (e) {
+    // If branch fails, try auto-detecting
+    if (e.message && e.message.includes("404")) {
+      try {
+        const repoData = await ghFetch(`https://api.github.com/repos/${repo}`);
+        const defaultBranch = repoData.default_branch || "main";
+        if (defaultBranch !== branch) {
+          data = await ghFetch(`https://api.github.com/repos/${repo}/contents/${path}?ref=${defaultBranch}`);
+        } else { throw e; }
+      } catch { throw e; }
+    } else { throw e; }
+  }
   const content = data.encoding === "base64" ? Buffer.from(data.content, "base64").toString("utf8") : data.content;
-  return { success: true, path: data.path, content, sha: data.sha, size: data.size };
+  return { success: true, path: data.path, content, sha: data.sha, size: data.size, branch };
 }
 
 export async function github_trigger_copilot(repo, issue) {
