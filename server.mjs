@@ -1065,20 +1065,20 @@ async function invokeAgent(agentName, userMessage, sessionId = null) {
           } else {
             throw new Error(`Unknown tool: ${tc.tool}`);
           }
-          toolResults.push({ tool: tc.tool, success: true, result: typeof toolResult === "string" ? toolResult : JSON.stringify(toolResult).slice(0, 2000) });
+          toolResults.push({ tool: tc.tool, success: true, result: typeof toolResult === "string" ? toolResult : JSON.stringify(toolResult).slice(0, 4000) });
           logActivity(agentName, agent.name, "tool_result", `${tc.tool}: success`);
         } catch (toolErr) {
           toolResults.push({ tool: tc.tool, success: false, error: toolErr.message });
           logActivity(agentName, agent.name, "tool_error", `${tc.tool}: ${toolErr.message.slice(0, 100)}`);
         }
       }
-      // Follow-up LLM call with tool results
+      // Follow-up LLM call with tool results — STRICT: no hallucination allowed
       const toolResultsSummary = toolResults.map(tr =>
         tr.success ? `✅ ${tr.tool}: ${tr.result}` : `❌ ${tr.tool}: ERROR — ${tr.error}`
       ).join("\n\n");
       messages.push(
         { role: "assistant", content: finalText },
-        { role: "user", content: `Tool execution results:\n\n${toolResultsSummary}\n\nSummarize the results for the user in a warm, concise way. No raw JSON — just the key info.` }
+        { role: "user", content: `TOOL EXECUTION RESULTS (this is the REAL data — do NOT invent, embellish, or add any numbers/facts not present here):\n\n${toolResultsSummary}\n\nRULES FOR YOUR RESPONSE:\n1. ONLY report numbers and facts that appear EXACTLY in the tool results above\n2. If a tool failed, say it failed and show the exact error\n3. Do NOT invent counts, file names, or success messages\n4. Do NOT say "loaded X skills" unless the results explicitly say that exact number\n5. If the results are empty or unclear, say so honestly\n6. Keep it concise but TRUTHFUL` }
       );
       const followUp = await callAgentLLM(agentName, messages);
       finalText = followUp.text;
@@ -1097,7 +1097,7 @@ async function invokeAgent(agentName, userMessage, sessionId = null) {
             const resultSummary = result.file ? `File created: ${result.file}. ${result.message || ""}` : (result.output || JSON.stringify(result).slice(0, 1000));
             messages.push(
               { role: "assistant", content: finalText },
-              { role: "user", content: `Tool result: ${resultSummary}\n\nSummarize warmly for the user. No raw JSON.` }
+              { role: "user", content: `TOOL RESULT (REAL data — do NOT invent anything not shown here):\n${resultSummary}\n\nReport ONLY what is in the result above. Do NOT add numbers, counts, or facts not present. If it failed, say so.` }
             );
             const followUp = await callAgentLLM(agentName, messages);
             finalText = followUp.text;
@@ -2979,25 +2979,36 @@ async function executeTool(tool, params) {
     
     try {
       const headers = { "Accept": "application/vnd.github.v3+json", "User-Agent": "MindMappr-Agent" };
-      if (ghToken) headers["Authorization"] = `Bearer ${ghToken}`;
+      if (ghToken) headers["Authorization"] = `token ${ghToken}`;
       
-      // 1. List all repos for the user/org
+      // 1. Use GitHub Search API to find skill-related repos (more reliable than listing)
+      const searchQueries = ["skill", "agent", "tool", "plugin", "expert"];
+      const repoSet = new Map();
+      for (const q of searchQueries) {
+        try {
+          const searchResp = await fetch(`https://api.github.com/search/repositories?q=user:${owner}+${q}+in:name&per_page=30`, { headers });
+          if (searchResp.ok) {
+            const searchData = await searchResp.json();
+            for (const r of (searchData.items || [])) {
+              repoSet.set(r.full_name, r);
+            }
+          }
+        } catch {}
+      }
+      // Also list first page of repos to catch anything the search missed
       const reposResp = await fetch(`https://api.github.com/users/${owner}/repos?per_page=100&sort=updated`, { headers });
-      if (!reposResp.ok) throw new Error(`Failed to list repos: ${reposResp.status}`);
-      const repos = await reposResp.json();
+      let allReposCount = 0;
+      if (reposResp.ok) {
+        const repos = await reposResp.json();
+        allReposCount = repos.length;
+      }
+      const repos = Array.from(repoSet.values());
       
-      // 2. Find repos that look like skill repositories
-      const skillKeywords = ["skill", "skills", "agent", "tool", "plugin", "expert"];
+      // 2. All repos from search are skill-related — scan each for skill files
       const skillRepos = [];
-      const otherReposWithSkills = [];
       
       for (const repo of repos) {
-        const nameLC = (repo.name || "").toLowerCase();
-        const descLC = (repo.description || "").toLowerCase();
-        const isSkillRepo = skillKeywords.some(k => nameLC.includes(k) || descLC.includes(k));
-        
-        if (isSkillRepo) {
-          // Get the file tree to find skill files
+        {
           const branch = repo.default_branch || "main";
           try {
             const treeResp = await fetch(`https://api.github.com/repos/${repo.full_name}/git/trees/${branch}?recursive=1`, { headers });
@@ -3074,7 +3085,7 @@ async function executeTool(tool, params) {
         loaded_count: loaded,
         failed_count: failed,
         load_results: loadResults.slice(0, 20), // cap output
-        message: `Scanned ${repos.length} repos for ${owner}. Found ${skillRepos.length} skill repo(s) with ${skillRepos.reduce((s,r) => s + r.skill_count, 0)} skill files total. ${autoLoad ? `Auto-loaded ${loaded} skills (${failed} failed).` : "Set auto_load:true to load them."}`
+        message: `Scanned ${allReposCount || repos.length} repos for ${owner}. Found ${skillRepos.length} skill repo(s) with ${skillRepos.reduce((s,r) => s + r.skill_count, 0)} skill files total. ${autoLoad ? `Auto-loaded ${loaded} skills (${failed} failed).` : "Set auto_load:true to load them."}`
       };
     } catch (e) {
       return { success: false, error: `Skill discovery failed: ${e.message}` };
@@ -3852,7 +3863,7 @@ app.get("/api/health", (_, res) => {
   res.json({
     status: "ok",
     service: "MindMappr Agent v8.5 — Command Center + Content Studio + Activity Window + Rex Tools + Google Workspace + Legal + Stripe",
-    version: "9.0.0",
+    version: "9.1.0",
     features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections", "connection_validation", "telegram_bot", "discord_bot", "openclaw_skills_hub", "web_search", "discord_channel_mgmt", "google_calendar", "stripe_integration", "legal_agent", "auto_connect"],
     skillsCount: db.prepare("SELECT COUNT(*) as c FROM skills WHERE enabled = 1").get().c,
     skillsSources: db.prepare("SELECT source, COUNT(*) as count FROM skills WHERE enabled = 1 GROUP BY source").all(),
@@ -4180,7 +4191,7 @@ app.post("/api/chat", async (req, res) => {
               ...history.slice(-10),
               { role: "user", content: userContent },
               { role: "assistant", content: reply },
-              { role: "user", content: `All ${planResult.totalSteps} steps completed successfully! Final file: ${lastFile.name}. ${lastFile.message}. Give a warm 1-2 sentence response saying everything is ready. Mention what was created. No filenames, no code.` }
+              { role: "user", content: `All ${planResult.totalSteps} steps completed successfully! Final file: ${lastFile.name}. ${lastFile.message}. Report exactly what was created based on the data above. Be truthful. Do NOT invent file names or details not shown.` }
             ], model);
             reply = (typeof fu === "string" ? fu : "All done!").replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "").replace(/<task_plan>[\s\S]*?<\/task_plan>/g, "").trim();
           } else if (!planResult.success) {
@@ -4202,7 +4213,7 @@ app.post("/api/chat", async (req, res) => {
                 ...history.slice(-10),
                 { role: "user", content: userContent },
                 { role: "assistant", content: reply },
-                { role: "user", content: `Done. File created: ${result.file}. ${result.message}. Give a warm 1-2 sentence plain response saying it is ready. No filenames, no code, no technical details.` }
+                { role: "user", content: `Done. File created: ${result.file}. ${result.message}. Report exactly what was created. Be truthful and concise. Only state facts from the result above.` }
               ], model);
               reply = (typeof fu === "string" ? fu : "Your file is ready!").replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "").trim();
             } else if (result.success && result.output) {
@@ -4211,7 +4222,7 @@ app.post("/api/chat", async (req, res) => {
                 ...history.slice(-10),
                 { role: "user", content: userContent },
                 { role: "assistant", content: reply },
-                { role: "user", content: `Code ran. Output: ${result.output.slice(0, 800)}. Summarize the result warmly in 1-3 sentences.` }
+                { role: "user", content: `Code ran. Output: ${result.output.slice(0, 800)}. Report the output truthfully. Only state facts from the result above. Do NOT add information not present.` }
               ], model);
               reply = (typeof fu === "string" ? fu : "Done!").replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "").trim();
             } else if (!result.success) {
