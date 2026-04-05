@@ -2622,18 +2622,36 @@ async function executeTool(tool, params) {
           throw new Error(`Could not parse GitHub URL. Expected format: github.com/owner/repo/blob/branch/path/to/file`);
         }
 
-        // Try GitHub API first (works for private repos with PAT)
-        const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}?ref=${branch}`;
+        // Build auth headers
         const headers = { "Accept": "application/vnd.github.v3.raw", "User-Agent": "MindMappr-Agent" };
         if (ghToken) headers["Authorization"] = `Bearer ${ghToken}`;
 
+        // Try GitHub API with the parsed branch
+        let apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}?ref=${branch}`;
         let resp = await fetch(apiUrl, { headers });
 
+        // If 404, the branch might be wrong — auto-detect default branch from repo metadata
+        if (!resp.ok && resp.status === 404) {
+          const repoHeaders = { "Accept": "application/vnd.github.v3+json", "User-Agent": "MindMappr-Agent" };
+          if (ghToken) repoHeaders["Authorization"] = `Bearer ${ghToken}`;
+          const repoResp = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers: repoHeaders });
+          if (repoResp.ok) {
+            const repoData = await repoResp.json();
+            const defaultBranch = repoData.default_branch || "main";
+            if (defaultBranch !== branch) {
+              // Retry with the correct default branch
+              branch = defaultBranch;
+              apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}?ref=${defaultBranch}`;
+              resp = await fetch(apiUrl, { headers });
+            }
+          }
+        }
+
+        // Final fallback: try raw.githubusercontent.com
         if (!resp.ok) {
-          // Fallback: try raw.githubusercontent.com (public repos only)
           const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filePath}`;
           resp = await fetch(rawUrl);
-          if (!resp.ok) throw new Error(`Failed to fetch skill: ${resp.status} ${resp.statusText}. URL: ${apiUrl}`);
+          if (!resp.ok) throw new Error(`Failed to fetch skill: ${resp.status} ${resp.statusText}. Tried branch "${branch}" at ${apiUrl}`);
         }
         content = await resp.text();
       } else {
@@ -3405,7 +3423,7 @@ app.get("/api/health", (_, res) => {
   res.json({
     status: "ok",
     service: "MindMappr Agent v8.5 — Command Center + Content Studio + Activity Window + Rex Tools + Google Workspace + Legal + Stripe",
-    version: "8.7.1",
+    version: "8.7.2",
     features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections", "connection_validation", "telegram_bot", "discord_bot", "openclaw_skills_hub", "web_search", "discord_channel_mgmt", "google_calendar", "stripe_integration", "legal_agent", "auto_connect"],
     skillsCount: db.prepare("SELECT COUNT(*) as c FROM skills WHERE enabled = 1").get().c,
     skillsSources: db.prepare("SELECT source, COUNT(*) as count FROM skills WHERE enabled = 1 GROUP BY source").all(),
