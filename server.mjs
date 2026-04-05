@@ -2592,18 +2592,56 @@ async function executeTool(tool, params) {
     if (!url) return { success: false, error: "Please provide a URL to the skill file." };
 
     try {
-      // Support GitHub URLs — convert to raw content URL
-      let rawUrl = url;
-      if (url.includes("github.com") && !url.includes("raw.githubusercontent.com")) {
-        rawUrl = url
-          .replace("github.com", "raw.githubusercontent.com")
-          .replace("/blob/", "/");
-      }
+      let content;
 
-      // Fetch the skill content
-      const resp = await fetch(rawUrl);
-      if (!resp.ok) throw new Error(`Failed to fetch skill: ${resp.status} ${resp.statusText}`);
-      const content = await resp.text();
+      // For GitHub URLs, use the GitHub API with PAT for auth (handles private repos)
+      if (url.includes("github.com") || url.includes("raw.githubusercontent.com")) {
+        const ghToken = getConnectionToken("github") || process.env.GITHUB_PAT || process.env.GITHUB_TOKEN || "";
+
+        // Parse GitHub URL to extract owner/repo/branch/path
+        // Formats: github.com/owner/repo/blob/branch/path or raw.githubusercontent.com/owner/repo/branch/path
+        let owner, repo, branch, filePath;
+        const cleanUrl = url.replace(/^https?:\/\//, "");
+
+        if (cleanUrl.startsWith("raw.githubusercontent.com")) {
+          const parts = cleanUrl.replace("raw.githubusercontent.com/", "").split("/");
+          owner = parts[0]; repo = parts[1]; branch = parts[2]; filePath = parts.slice(3).join("/");
+        } else {
+          // github.com/owner/repo/blob/branch/path
+          const parts = cleanUrl.replace("github.com/", "").split("/");
+          owner = parts[0]; repo = parts[1];
+          // Skip 'blob' or 'tree' if present
+          const blobIdx = parts.indexOf("blob");
+          const treeIdx = parts.indexOf("tree");
+          const startIdx = blobIdx >= 0 ? blobIdx + 1 : (treeIdx >= 0 ? treeIdx + 1 : 2);
+          branch = parts[startIdx] || "main";
+          filePath = parts.slice(startIdx + 1).join("/");
+        }
+
+        if (!owner || !repo || !filePath) {
+          throw new Error(`Could not parse GitHub URL. Expected format: github.com/owner/repo/blob/branch/path/to/file`);
+        }
+
+        // Try GitHub API first (works for private repos with PAT)
+        const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}?ref=${branch}`;
+        const headers = { "Accept": "application/vnd.github.v3.raw", "User-Agent": "MindMappr-Agent" };
+        if (ghToken) headers["Authorization"] = `Bearer ${ghToken}`;
+
+        let resp = await fetch(apiUrl, { headers });
+
+        if (!resp.ok) {
+          // Fallback: try raw.githubusercontent.com (public repos only)
+          const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filePath}`;
+          resp = await fetch(rawUrl);
+          if (!resp.ok) throw new Error(`Failed to fetch skill: ${resp.status} ${resp.statusText}. URL: ${apiUrl}`);
+        }
+        content = await resp.text();
+      } else {
+        // Non-GitHub URL — fetch directly
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`Failed to fetch skill: ${resp.status} ${resp.statusText}`);
+        content = await resp.text();
+      }
 
       // Detect skill type
       let detectedType = skillType;
@@ -3367,7 +3405,7 @@ app.get("/api/health", (_, res) => {
   res.json({
     status: "ok",
     service: "MindMappr Agent v8.5 — Command Center + Content Studio + Activity Window + Rex Tools + Google Workspace + Legal + Stripe",
-    version: "8.7.0",
+    version: "8.7.1",
     features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections", "connection_validation", "telegram_bot", "discord_bot", "openclaw_skills_hub", "web_search", "discord_channel_mgmt", "google_calendar", "stripe_integration", "legal_agent", "auto_connect"],
     skillsCount: db.prepare("SELECT COUNT(*) as c FROM skills WHERE enabled = 1").get().c,
     skillsSources: db.prepare("SELECT source, COUNT(*) as count FROM skills WHERE enabled = 1 GROUP BY source").all(),
