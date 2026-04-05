@@ -302,6 +302,26 @@ try {
   }
 } catch (e) { console.error('[Skills] Seed error:', e.message); }
 
+// ── Restore previously loaded skills into memory on startup ─────────────
+try {
+  const loadedRows = db.prepare(
+    "SELECT id, name, implementation_type, implementation_content, source FROM skills WHERE loaded = 1 AND enabled = 1 AND implementation_content IS NOT NULL"
+  ).all();
+  for (const row of loadedRows) {
+    loadedSkills.set(row.id, {
+      id: row.id,
+      name: row.name,
+      type: row.implementation_type,
+      content: row.implementation_content,
+      url: row.source,
+      loadedAt: new Date().toISOString()
+    });
+  }
+  if (loadedRows.length > 0) {
+    console.log(`[Skills] Restored ${loadedRows.length} previously loaded skill(s) into memory: ${loadedRows.map(r => r.name).join(", ")}`);
+  }
+} catch (e) { console.error('[Skills] Restore error:', e.message); }
+
 // Seed known facts about the owner
 const existingFacts = db.prepare("SELECT COUNT(*) as c FROM facts WHERE category = 'owner'").get();
 if (existingFacts.c === 0) {
@@ -3423,7 +3443,7 @@ app.get("/api/health", (_, res) => {
   res.json({
     status: "ok",
     service: "MindMappr Agent v8.5 — Command Center + Content Studio + Activity Window + Rex Tools + Google Workspace + Legal + Stripe",
-    version: "8.7.2",
+    version: "8.7.3",
     features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections", "connection_validation", "telegram_bot", "discord_bot", "openclaw_skills_hub", "web_search", "discord_channel_mgmt", "google_calendar", "stripe_integration", "legal_agent", "auto_connect"],
     skillsCount: db.prepare("SELECT COUNT(*) as c FROM skills WHERE enabled = 1").get().c,
     skillsSources: db.prepare("SELECT source, COUNT(*) as count FROM skills WHERE enabled = 1 GROUP BY source").all(),
