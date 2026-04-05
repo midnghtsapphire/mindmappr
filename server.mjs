@@ -3842,7 +3842,7 @@ app.get("/api/health", (_, res) => {
   res.json({
     status: "ok",
     service: "MindMappr Agent v8.5 — Command Center + Content Studio + Activity Window + Rex Tools + Google Workspace + Legal + Stripe",
-    version: "8.9.0",
+    version: "8.9.1",
     features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections", "connection_validation", "telegram_bot", "discord_bot", "openclaw_skills_hub", "web_search", "discord_channel_mgmt", "google_calendar", "stripe_integration", "legal_agent", "auto_connect"],
     skillsCount: db.prepare("SELECT COUNT(*) as c FROM skills WHERE enabled = 1").get().c,
     skillsSources: db.prepare("SELECT source, COUNT(*) as count FROM skills WHERE enabled = 1 GROUP BY source").all(),
@@ -4056,20 +4056,23 @@ app.get("/api/agent-tasks/stats", (_, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 app.post("/api/chat", async (req, res) => {
   try {
-    const { message, sessionId, attachedFile, model } = req.body;
+    const { message, sessionId, attachedFile, model, agentId } = req.body;
     if (!message && !attachedFile) return res.status(400).json({ success: false, error: "message required" });
     const sid = sessionId || "web-" + randomUUID().slice(0, 8);
     const hf = join(DATA_DIR, `session_${sid}.json`);
     let history = [];
     try { history = JSON.parse(readFileSync(hf, "utf8")); } catch {}
-
     let userContent = message || "";
     if (attachedFile) {
       userContent += `\n\n[User attached: ${attachedFile.name} (${attachedFile.type}, ${Math.round((attachedFile.size || 0) / 1024)}KB). File is available at uploads/${attachedFile.name}]`;
     }
-
-    // v6: Check for @agent mention
-    const { agentName, cleanMessage } = parseAgentMention(userContent);
+    // v6: Check for @agent mention OR agentId from request body
+    let { agentName, cleanMessage } = parseAgentMention(userContent);
+    // If no @mention but agentId was provided in the request body, use it
+    if (!agentName && agentId && AGENT_DEFINITIONS[agentId]) {
+      agentName = agentId;
+      cleanMessage = userContent;
+    }
     let reply = "";
     let generatedFile = null;
     let planProgress = null;
