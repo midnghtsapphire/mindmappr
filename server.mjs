@@ -1065,7 +1065,7 @@ async function invokeAgent(agentName, userMessage, sessionId = null) {
           } else {
             throw new Error(`Unknown tool: ${tc.tool}`);
           }
-          toolResults.push({ tool: tc.tool, success: true, result: typeof toolResult === "string" ? toolResult : JSON.stringify(toolResult).slice(0, 4000) });
+          toolResults.push({ tool: tc.tool, success: true, result: typeof toolResult === "string" ? toolResult : JSON.stringify(toolResult) });
           logActivity(agentName, agent.name, "tool_result", `${tc.tool}: success`);
         } catch (toolErr) {
           toolResults.push({ tool: tc.tool, success: false, error: toolErr.message });
@@ -1113,7 +1113,7 @@ async function invokeAgent(agentName, userMessage, sessionId = null) {
         try {
           const result = await executeTool(tc.tool, tc.params || {});
           if (result.success) {
-            const resultSummary = result.file ? `File created: ${result.file}. ${result.message || ""}` : (result.output || JSON.stringify(result).slice(0, 1000));
+            const resultSummary = result.file ? `File created: ${result.file}. ${result.message || ""}` : (result.output || JSON.stringify(result));
             // DIRECT output — no LLM rewriting
             finalText = `**Tool: ${tc.tool}** — ✅ Result:\n${resultSummary}`;
             logActivity(agentName, agent.name, "tool_result", `${tc.tool}: success`);
@@ -3054,7 +3054,7 @@ async function executeTool(tool, params) {
       
       if (autoLoad) {
         for (const sr of skillRepos) {
-          for (const filePath of sr.skill_files.slice(0, 50)) { // cap at 50 per repo
+          for (const filePath of sr.skill_files) {
             try {
               const fileHeaders = { ...headers, "Accept": "application/vnd.github.v3.raw" };
               const fileResp = await fetch(`https://api.github.com/repos/${sr.repo}/contents/${filePath}?ref=${sr.branch}`, { headers: fileHeaders });
@@ -3096,7 +3096,7 @@ async function executeTool(tool, params) {
         auto_loaded: autoLoad,
         loaded_count: loaded,
         failed_count: failed,
-        load_results: loadResults.slice(0, 20), // cap output
+        load_results: loadResults,
         message: `Scanned ${allReposCount || repos.length} repos for ${owner}. Found ${skillRepos.length} skill repo(s) with ${skillRepos.reduce((s,r) => s + r.skill_count, 0)} skill files total. ${autoLoad ? `Auto-loaded ${loaded} skills (${failed} failed).` : "Set auto_load:true to load them."}`
       };
     } catch (e) {
@@ -3141,7 +3141,7 @@ async function executeTool(tool, params) {
       
       if (autoLoad && skillFiles.length > 0) {
         const fileHeaders = { ...headers, "Accept": "application/vnd.github.v3.raw" };
-        for (const filePath of skillFiles.slice(0, 100)) {
+        for (const filePath of skillFiles) {
           try {
             const fileResp = await fetch(`https://api.github.com/repos/${repoName}/contents/${filePath}?ref=${branch}`, { headers: fileHeaders });
             if (!fileResp.ok) { failed++; continue; }
@@ -3178,7 +3178,7 @@ async function executeTool(tool, params) {
         all_skill_files: skillFiles,
         loaded_count: loaded,
         failed_count: failed,
-        load_results: loadResults.slice(0, 30),
+        load_results: loadResults,
         message: `Found ${skillFiles.length} skill files in ${repoName} (branch: ${branch}). ${autoLoad ? `Loaded ${loaded}, failed ${failed}.` : "Set auto_load:true to load them."}`
       };
     } catch (e) {
@@ -3875,7 +3875,7 @@ app.get("/api/health", (_, res) => {
   res.json({
     status: "ok",
     service: "MindMappr Agent v8.5 — Command Center + Content Studio + Activity Window + Rex Tools + Google Workspace + Legal + Stripe",
-    version: "9.2.0",
+    version: "9.2.1",
     features: ["multi_step_planner", "long_term_memory", "error_recovery", "cron_scheduler", "agent_system", "task_history", "content_studio", "ai_content_composer", "algorithm_scorer", "brain_dump", "content_repurposer", "content_coach", "account_researcher", "activity_window", "rex_tool_use", "sqlite_connections", "connection_validation", "telegram_bot", "discord_bot", "openclaw_skills_hub", "web_search", "discord_channel_mgmt", "google_calendar", "stripe_integration", "legal_agent", "auto_connect"],
     skillsCount: db.prepare("SELECT COUNT(*) as c FROM skills WHERE enabled = 1").get().c,
     skillsSources: db.prepare("SELECT source, COUNT(*) as count FROM skills WHERE enabled = 1 GROUP BY source").all(),
