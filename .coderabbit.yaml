@@ -1,0 +1,46 @@
+# CodeRabbit configuration for MindMappr
+# https://docs.coderabbit.ai/guides/configure-coderabbit
+
+language: "en-US"
+
+tone_instructions: >
+  Be direct and concise. Flag security issues and data-loss risks with high urgency.
+  For general style suggestions, be brief. Avoid over-engineering recommendations.
+
+reviews:
+  # Request changes automatically for high-severity issues
+  request_changes_workflow: true
+
+  # Post a summary on every PR
+  high_level_summary: true
+
+  # Review all file types we use
+  path_filters:
+    - "**/*.mjs"
+    - "**/*.ts"
+    - "**/*.tsx"
+    - "**/*.js"
+    - "**/*.json"
+    - "**/*.yml"
+    - "**/*.yaml"
+    - "**/*.md"
+
+  auto_review:
+    enabled: true
+    # Review every PR targeting master
+    base_branches:
+      - master
+      - main
+
+  review_status: true
+
+  poem: false
+
+  collapse_walkthrough: false
+
+  finishing_touches:
+    docstrings:
+      enabled: false
+
+chat:
+  auto_reply: true
