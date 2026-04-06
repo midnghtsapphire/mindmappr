@@ -119,7 +119,7 @@
     .input-row { display: flex; gap: 8px; align-items: flex-end; }
     .attach-btn { background: none; border: 1px solid var(--border); color: var(--text2); border-radius: 8px; padding: 8px 10px; cursor: pointer; font-size: 16px; flex-shrink: 0; transition: all .15s; }
     .attach-btn:hover { border-color: var(--accent); color: var(--accent); }
-    textarea.chat-input { flex: 1; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; color: var(--text); font-family: inherit; font-size: 14px; resize: none; min-height: 44px; max-height: 160px; outline: none; transition: border-color .15s; }
+    textarea.chat-input { flex: 1; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; color: var(--text); font-family: inherit; font-size: 14px; resize: none; min-height: 44px; max-height: 400px; outline: none; transition: border-color .15s; }
     textarea.chat-input:focus { border-color: var(--accent); }
     .send-btn { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: white; border: none; border-radius: 10px; padding: 10px 18px; cursor: pointer; font-size: 14px; font-weight: 600; flex-shrink: 0; transition: opacity .15s; }
     .send-btn:disabled { opacity: .5; cursor: not-allowed; }
@@ -233,6 +233,19 @@
     .agent-status-dot.offline::before { background: var(--text2); }
     .agent-invoke-btn { background: none; border: 1px solid var(--border); color: var(--text2); border-radius: 6px; padding: 5px 12px; font-size: 12px; cursor: pointer; font-weight: 500; transition: all .15s; }
     .agent-invoke-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .agent-actions-bar { display: flex; gap: 6px; margin-top: 10px; }
+    .agent-actions-bar .btn-sm { padding: 5px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 500; border: 1px solid var(--border); background: var(--surface2); color: var(--text2); transition: all .15s; }
+    .agent-actions-bar .btn-sm:hover { border-color: var(--accent); color: var(--accent); }
+    .agent-actions-bar .btn-sm.btn-del { color: var(--accent); }
+    .agent-actions-bar .btn-sm.btn-del:hover { background: rgba(233,69,96,.15); }
+    .create-agent-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+    .create-agent-box { background: var(--surface); border: 1px solid rgba(233,69,96,.3); border-radius: 16px; padding: 32px; max-width: 520px; width: 90%; max-height: 85vh; overflow-y: auto; }
+    .create-agent-box h3 { font-size: 18px; font-weight: 700; margin-bottom: 4px; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .create-agent-box .modal-sub { font-size: 13px; color: var(--text2); margin-bottom: 20px; }
+    .create-agent-box textarea.form-input { min-height: 80px; resize: vertical; }
+    .create-agent-actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px; }
+    .btn-create-agent { display: flex; align-items: center; gap: 6px; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: white; border: none; border-radius: 8px; padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer; transition: opacity .15s; margin-bottom: 16px; }
+    .btn-create-agent:hover { opacity: .9; }
 
     /* ── v6: Task History panel ── */
     .task-history-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
@@ -285,6 +298,36 @@
     #toast.success { border-color: var(--green); }
     #toast.error { border-color: var(--accent); }
 
+    /* ── Content Studio panel ── */
+    .studio-tool-btn { padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--text2); transition: all .15s; }
+    .studio-tool-btn:hover { border-color: #06b6d4; color: #06b6d4; }
+    .studio-tool-btn.active { background: linear-gradient(135deg, rgba(6,182,212,0.15), rgba(139,92,246,0.15)); border-color: #06b6d4; color: #06b6d4; box-shadow: 0 0 12px rgba(6,182,212,0.15); }
+    .studio-panel { display: none; }
+    .studio-panel.active { display: block; }
+    .score-meter { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .score-meter-label { font-size: 13px; color: var(--text2); width: 140px; flex-shrink: 0; }
+    .score-meter-track { flex: 1; height: 8px; background: var(--surface2); border-radius: 4px; overflow: hidden; }
+    .score-meter-fill { height: 100%; border-radius: 4px; transition: width .6s ease; }
+    .score-meter-val { font-size: 13px; font-weight: 600; width: 36px; text-align: right; }
+    .score-overall { font-size: 48px; font-weight: 800; text-align: center; margin: 16px 0; }
+    .studio-result-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; }
+    .studio-result-title { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+    .studio-result-content { font-size: 14px; line-height: 1.7; white-space: pre-wrap; color: var(--text); background: var(--surface2); padding: 14px; border-radius: 8px; max-height: 400px; overflow-y: auto; }
+    .studio-history-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 10px; transition: border-color .15s; }
+    .studio-history-card:hover { border-color: rgba(6,182,212,0.5); }
+    .studio-history-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+    .studio-history-meta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .studio-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+    .studio-badge-platform { background: rgba(6,182,212,0.15); color: #06b6d4; }
+    .studio-badge-type { background: rgba(139,92,246,0.15); color: #8b5cf6; }
+    .studio-badge-score { background: rgba(245,158,11,0.15); color: #f59e0b; }
+    .studio-badge-draft { background: rgba(148,163,184,0.15); color: #94a3b8; }
+    .studio-badge-published { background: rgba(16,185,129,0.15); color: #10b981; }
+    .studio-history-preview { font-size: 13px; color: var(--text2); line-height: 1.5; max-height: 60px; overflow: hidden; }
+    .studio-loading { display: flex; align-items: center; gap: 8px; padding: 20px; justify-content: center; }
+    .studio-loading .typing { display: flex; gap: 4px; }
+    .studio-loading .typing span { width: 7px; height: 7px; border-radius: 50%; animation: bounce 1.2s infinite; }
+
     @media (max-width: 768px) {
       .sessions-sidebar { display: none; }
       .agents-grid { grid-template-columns: 1fr; }
@@ -300,7 +343,7 @@
 <body>
 
 <div class="topbar">
-  <span class="logo">MindMappr<span class="logo-sub">Command Center v6</span></span>
+  <span class="logo">MindMappr<span class="logo-sub">Command Center v7</span></span>
   <span style="flex:1"></span>
   <span class="status-label" id="statusLabel">Connected</span>
   <span class="status-dot" id="statusDot"></span>
@@ -315,7 +358,10 @@
   <div class="tab" data-tab="connections">Connections</div>
   <div class="tab" data-tab="apis">APIs</div>
   <div class="tab" data-tab="analytics">Analytics</div>
+  <div class="tab" data-tab="activity">Activity</div>
+  <div class="tab" data-tab="studio">Content Studio</div>
   <div class="tab" data-tab="deploy">Deploy</div>
+  <div class="tab" data-tab="skills">Skills Vault</div>
 </div>
 
 <div class="main">
@@ -355,7 +401,8 @@
   <div class="panel" id="panel-agents">
     <div class="panel-inner">
       <div class="panel-title">Agent Command Center</div>
-      <div class="panel-sub">5 specialized AI agents — click any agent to chat with them directly</div>
+      <div class="panel-sub">Specialized AI agents — click any agent to chat, or create your own custom agents</div>
+      <button class="btn-create-agent" onclick="openCreateAgentModal()">➕ Create Agent</button>
       <div id="agentsGrid" class="agents-grid">
         <div style="color:var(--text2);font-size:13px">Loading agents…</div>
       </div>
@@ -527,6 +574,278 @@
     </div>
   </div>
 
+  <!-- ── ACTIVITY WINDOW ── -->
+  <div class="panel" id="panel-activity">
+    <div class="panel-inner">
+      <div class="panel-title" style="background:linear-gradient(135deg,#10b981,#06b6d4);-webkit-background-clip:text;-webkit-text-fill-color:transparent;display:inline-block">Activity Window</div>
+      <div class="panel-sub">Virtual office — see what every agent is doing right now</div>
+
+      <!-- Live Agent Status Grid -->
+      <div id="activity-live" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px;margin-top:20px"></div>
+
+      <!-- Activity Feed -->
+      <div style="margin-top:28px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <span style="font-size:14px;font-weight:600;color:var(--text2)">Recent Activity Feed</span>
+          <button onclick="loadActivityFeed()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text2);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px">Refresh</button>
+        </div>
+        <div id="activity-feed" style="max-height:400px;overflow-y:auto;display:flex;flex-direction:column;gap:6px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── CONTENT STUDIO ── -->
+  <div class="panel" id="panel-studio">
+    <div class="panel-inner">
+      <div class="panel-title" style="background:linear-gradient(135deg,#06b6d4,#8b5cf6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;display:inline-block">Content Studio</div>
+      <div class="panel-sub">AI-powered content creation suite — compose, score, repurpose, and coach your content like a pro</div>
+
+      <!-- Studio Stats Row -->
+      <div class="stats-grid" id="studioStatsGrid" style="margin-bottom:20px">
+        <div class="stat-card" style="border-color:rgba(6,182,212,0.25)"><div class="stat-num" style="color:#06b6d4" id="studioStatTotal">0</div><div class="stat-label">Total Posts</div></div>
+        <div class="stat-card" style="border-color:rgba(139,92,246,0.25)"><div class="stat-num" style="color:#8b5cf6" id="studioStatDrafts">0</div><div class="stat-label">Drafts</div></div>
+        <div class="stat-card" style="border-color:rgba(16,185,129,0.25)"><div class="stat-num" style="color:#10b981" id="studioStatPublished">0</div><div class="stat-label">Published</div></div>
+        <div class="stat-card" style="border-color:rgba(245,158,11,0.25)"><div class="stat-num" style="color:#f59e0b" id="studioStatAvgScore">0</div><div class="stat-label">Avg Score</div></div>
+      </div>
+
+      <!-- Studio Tool Selector -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px">
+        <button class="studio-tool-btn active" data-tool="compose" onclick="switchStudioTool('compose')">&#x270D;&#xFE0F; Compose</button>
+        <button class="studio-tool-btn" data-tool="score" onclick="switchStudioTool('score')">&#x1F4CA; Score</button>
+        <button class="studio-tool-btn" data-tool="braindump" onclick="switchStudioTool('braindump')">&#x1F9E0; Brain Dump</button>
+        <button class="studio-tool-btn" data-tool="repurpose" onclick="switchStudioTool('repurpose')">&#x267B;&#xFE0F; Repurpose</button>
+        <button class="studio-tool-btn" data-tool="coach" onclick="switchStudioTool('coach')">&#x1F3AF; Coach</button>
+        <button class="studio-tool-btn" data-tool="research" onclick="switchStudioTool('research')">&#x1F50D; Research</button>
+        <button class="studio-tool-btn" data-tool="history" onclick="switchStudioTool('history')">&#x1F4DD; History</button>
+      </div>
+
+      <!-- ═══ COMPOSE TOOL ═══ -->
+      <div class="studio-panel active" id="studio-compose">
+        <div class="card" style="border-color:rgba(6,182,212,0.25)">
+          <div class="card-title" style="color:#06b6d4">AI Content Composer</div>
+          <div class="card-sub">Create platform-optimized, ready-to-post content for any social network</div>
+          <div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div class="form-group">
+              <label class="form-label">Platform</label>
+              <select class="form-input form-select" id="composePlatform">
+                <option value="general">General</option>
+                <option value="twitter">X / Twitter</option>
+                <option value="linkedin">LinkedIn</option>
+                <option value="instagram">Instagram</option>
+                <option value="facebook">Facebook</option>
+                <option value="tiktok">TikTok</option>
+                <option value="youtube_script">YouTube</option>
+                <option value="blog">Blog</option>
+                <option value="email">Email</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Content Type</label>
+              <select class="form-input form-select" id="composeType">
+                <option value="post">Single Post</option>
+                <option value="thread">Thread</option>
+                <option value="article">Article</option>
+                <option value="video_script">Video Script</option>
+                <option value="carousel">Carousel</option>
+                <option value="newsletter">Newsletter</option>
+                <option value="ad_copy">Ad Copy</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:12px">
+            <label class="form-label">Topic / Idea</label>
+            <textarea class="form-input" id="composeTopic" rows="2" placeholder="What do you want to create content about?" style="resize:vertical"></textarea>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div class="form-group">
+              <label class="form-label">Tone</label>
+              <select class="form-input form-select" id="composeTone">
+                <option value="professional yet approachable">Professional</option>
+                <option value="casual and conversational">Casual</option>
+                <option value="inspiring and motivational">Inspiring</option>
+                <option value="humorous and witty">Humorous</option>
+                <option value="educational and informative">Educational</option>
+                <option value="bold and provocative">Bold</option>
+                <option value="warm and personal">Personal</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Keywords (optional)</label>
+              <input class="form-input" id="composeKeywords" placeholder="SEO keywords, comma-separated" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Target Audience (optional)</label>
+            <input class="form-input" id="composeAudience" placeholder="e.g., small business owners, tech enthusiasts" />
+          </div>
+          <button class="btn-primary" style="margin-top:8px;background:linear-gradient(135deg,#06b6d4,#8b5cf6)" onclick="runCompose()" id="composeBtn">Generate Content</button>
+        </div>
+        <div id="composeResult" style="display:none">
+          <div class="card" style="border-color:rgba(6,182,212,0.25);margin-top:12px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+              <div class="card-title" style="color:#06b6d4">Generated Content</div>
+              <div style="display:flex;gap:8px">
+                <button class="btn-sm" style="background:rgba(6,182,212,0.15);color:#06b6d4;border:1px solid rgba(6,182,212,0.3)" onclick="copyStudioContent('composeOutput')">Copy</button>
+                <button class="btn-sm" style="background:rgba(139,92,246,0.15);color:#8b5cf6;border:1px solid rgba(139,92,246,0.3)" onclick="scoreFromCompose()">Score It</button>
+              </div>
+            </div>
+            <div id="composeOutput" style="font-size:14px;line-height:1.7;white-space:pre-wrap;color:var(--text);background:var(--surface2);padding:16px;border-radius:8px;max-height:500px;overflow-y:auto"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ SCORE TOOL ═══ -->
+      <div class="studio-panel" id="studio-score">
+        <div class="card" style="border-color:rgba(245,158,11,0.25)">
+          <div class="card-title" style="color:#f59e0b">Algorithm Content Scorer</div>
+          <div class="card-sub">Score your content on 9 algorithm metrics before posting — know how it will perform</div>
+          <div style="display:grid;grid-template-columns:1fr auto;gap:12px;margin-top:16px">
+            <div class="form-group" style="margin:0">
+              <label class="form-label">Platform</label>
+              <select class="form-input form-select" id="scorePlatform">
+                <option value="general">General</option>
+                <option value="twitter">X / Twitter</option>
+                <option value="linkedin">LinkedIn</option>
+                <option value="instagram">Instagram</option>
+                <option value="facebook">Facebook</option>
+                <option value="tiktok">TikTok</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:12px">
+            <label class="form-label">Content to Score</label>
+            <textarea class="form-input" id="scoreContent" rows="5" placeholder="Paste or type the content you want to score..." style="resize:vertical"></textarea>
+          </div>
+          <button class="btn-primary" style="margin-top:8px;background:linear-gradient(135deg,#f59e0b,#ef4444)" onclick="runScore()" id="scoreBtn">Analyze Content</button>
+        </div>
+        <div id="scoreResult" style="display:none"></div>
+      </div>
+
+      <!-- ═══ BRAIN DUMP TOOL ═══ -->
+      <div class="studio-panel" id="studio-braindump">
+        <div class="card" style="border-color:rgba(236,72,153,0.25)">
+          <div class="card-title" style="color:#ec4899">AI Brain Dump</div>
+          <div class="card-sub">Pour out your raw thoughts — AI transforms them into polished, platform-ready content</div>
+          <div class="form-group" style="margin-top:16px">
+            <label class="form-label">Your Raw Thoughts</label>
+            <textarea class="form-input" id="braindumpThoughts" rows="8" placeholder="Just start typing whatever is on your mind. Don't worry about structure, grammar, or making sense. The AI will extract every usable idea and turn them into ready-to-post content..." style="resize:vertical"></textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Target Platforms</label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap" id="braindumpPlatforms">
+              <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--text2);cursor:pointer"><input type="checkbox" value="twitter" checked> X/Twitter</label>
+              <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--text2);cursor:pointer"><input type="checkbox" value="linkedin" checked> LinkedIn</label>
+              <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--text2);cursor:pointer"><input type="checkbox" value="instagram"> Instagram</label>
+              <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--text2);cursor:pointer"><input type="checkbox" value="facebook"> Facebook</label>
+              <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--text2);cursor:pointer"><input type="checkbox" value="blog" checked> Blog</label>
+            </div>
+          </div>
+          <button class="btn-primary" style="margin-top:8px;background:linear-gradient(135deg,#ec4899,#8b5cf6)" onclick="runBrainDump()" id="braindumpBtn">Transform My Thoughts</button>
+        </div>
+        <div id="braindumpResult" style="display:none"></div>
+      </div>
+
+      <!-- ═══ REPURPOSE TOOL ═══ -->
+      <div class="studio-panel" id="studio-repurpose">
+        <div class="card" style="border-color:rgba(16,185,129,0.25)">
+          <div class="card-title" style="color:#10b981">AI Content Repurposer</div>
+          <div class="card-sub">Paste any post that inspired you — AI creates original versions in your voice</div>
+          <div class="form-group" style="margin-top:16px">
+            <label class="form-label">Original Content (paste what inspired you)</label>
+            <textarea class="form-input" id="repurposeOriginal" rows="5" placeholder="Paste the content you want to repurpose..." style="resize:vertical"></textarea>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div class="form-group">
+              <label class="form-label">Original Author (optional)</label>
+              <input class="form-input" id="repurposeAuthor" placeholder="@username or name" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Target Platform</label>
+              <select class="form-input form-select" id="repurposePlatform">
+                <option value="general">General</option>
+                <option value="twitter">X / Twitter</option>
+                <option value="linkedin">LinkedIn</option>
+                <option value="instagram">Instagram</option>
+                <option value="facebook">Facebook</option>
+                <option value="blog">Blog</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Your Voice / Style (optional)</label>
+            <input class="form-input" id="repurposeVoice" placeholder="e.g., warm and personal, data-driven, storytelling" />
+          </div>
+          <button class="btn-primary" style="margin-top:8px;background:linear-gradient(135deg,#10b981,#06b6d4)" onclick="runRepurpose()" id="repurposeBtn">Repurpose Content</button>
+        </div>
+        <div id="repurposeResult" style="display:none"></div>
+      </div>
+
+      <!-- ═══ COACH TOOL ═══ -->
+      <div class="studio-panel" id="studio-coach">
+        <div class="card" style="border-color:rgba(99,102,241,0.25)">
+          <div class="card-title" style="color:#6366f1">AI Content Coach</div>
+          <div class="card-sub">Your personal content strategist — analyzes your history and recommends what to post next</div>
+          <div class="form-group" style="margin-top:16px">
+            <label class="form-label">Ask Your Coach</label>
+            <textarea class="form-input" id="coachQuestion" rows="3" placeholder="e.g., What should I post about this week? How can I improve my engagement? What content format works best for my niche?" style="resize:vertical"></textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Additional Context (optional)</label>
+            <textarea class="form-input" id="coachHistory" rows="2" placeholder="Paste your recent post performance data, engagement stats, or any context..." style="resize:vertical"></textarea>
+          </div>
+          <button class="btn-primary" style="margin-top:8px;background:linear-gradient(135deg,#6366f1,#8b5cf6)" onclick="runCoach()" id="coachBtn">Get Advice</button>
+        </div>
+        <div id="coachResult" style="display:none"></div>
+      </div>
+
+      <!-- ═══ RESEARCH TOOL ═══ -->
+      <div class="studio-panel" id="studio-research">
+        <div class="card" style="border-color:rgba(244,63,94,0.25)">
+          <div class="card-title" style="color:#f43f5e">Account Researcher</div>
+          <div class="card-sub">Analyze any creator account — understand their strategy, hooks, and content gaps</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px">
+            <div class="form-group">
+              <label class="form-label">Account Name / Handle</label>
+              <input class="form-input" id="researchAccount" placeholder="@username or account name" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Platform</label>
+              <select class="form-input form-select" id="researchPlatform">
+                <option value="twitter">X / Twitter</option>
+                <option value="linkedin">LinkedIn</option>
+                <option value="instagram">Instagram</option>
+                <option value="youtube">YouTube</option>
+                <option value="tiktok">TikTok</option>
+              </select>
+            </div>
+          </div>
+          <button class="btn-primary" style="margin-top:8px;background:linear-gradient(135deg,#f43f5e,#ec4899)" onclick="runResearch()" id="researchBtn">Analyze Account</button>
+        </div>
+        <div id="researchResult" style="display:none"></div>
+      </div>
+
+      <!-- ═══ HISTORY TOOL ═══ -->
+      <div class="studio-panel" id="studio-history">
+        <div class="card" style="border-color:rgba(148,163,184,0.25)">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <div>
+              <div class="card-title" style="color:#94a3b8">Content History</div>
+              <div class="card-sub">All content you've created — drafts, published, and scored</div>
+            </div>
+            <button class="btn-sm" style="background:rgba(148,163,184,0.15);color:#94a3b8;border:1px solid rgba(148,163,184,0.3)" onclick="loadStudioHistory()">Refresh</button>
+          </div>
+        </div>
+        <div id="studioHistoryList" style="margin-top:12px"></div>
+      </div>
+
+      <!-- Attribution -->
+      <div style="margin-top:24px;padding:12px;text-align:center;font-size:11px;color:var(--text2);border-top:1px solid var(--border)">
+        Content Studio powered by free and open-source AI models via OpenRouter API
+      </div>
+    </div>
+  </div>
+
+
   <!-- ── DEPLOY ── -->
   <div class="panel" id="panel-deploy">
     <div class="panel-inner">
@@ -566,6 +885,22 @@
         <div style="font-size:15px;font-weight:600;margin-bottom:4px">All clear!</div>
         <div>No open pull requests for this repo</div>
       </div>
+    </div>
+  </div>
+
+  <!-- ── SKILLS VAULT ── -->
+  <div class="panel" id="panel-skills">
+    <div class="panel-inner">
+      <div class="panel-title">Skills Vault</div>
+      <div class="panel-sub">Expert skills from Revvel — click any skill to invoke it with Rex</div>
+      <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
+        <input type="text" id="skillSearch" class="form-input" placeholder="Search skills..." oninput="filterSkills()" style="flex:1;min-width:200px;max-width:360px" />
+        <select id="skillCategoryFilter" class="form-input form-select" onchange="filterSkills()" style="max-width:220px">
+          <option value="">All Categories</option>
+        </select>
+        <span id="skillCount" style="font-size:12px;color:var(--text2)"></span>
+      </div>
+      <div id="skillsGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px"></div>
     </div>
   </div>
 
@@ -613,7 +948,10 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (tab.dataset.tab === 'schedules') loadSchedules();
     if (tab.dataset.tab === 'agents') loadAgents();
     if (tab.dataset.tab === 'history') { loadTaskHistory(); loadTaskStats(); }
+    if (tab.dataset.tab === 'activity') { loadActivityLive(); loadActivityFeed(); }
+    if (tab.dataset.tab === 'studio') { loadStudioStats(); loadStudioHistory(); }
     if (tab.dataset.tab === 'deploy') loadPRs();
+    if (tab.dataset.tab === 'skills') loadSkills();
   });
 });
 
@@ -968,6 +1306,10 @@ async function loadAgents() {
             <span class="agent-status-dot ${statusClass}">${statusLabel}</span>
           </div>
         </div>
+        ${a.isCustom ? `<div class="agent-actions-bar">
+          <button class="btn-sm" onclick="event.stopPropagation();editAgent('${a.id}')">Edit</button>
+          <button class="btn-sm btn-del" onclick="event.stopPropagation();deleteAgent('${a.id}','${escHtml(a.name)}')">Delete</button>
+        </div>` : ''}
       </div>`;
     }).join('');
   } catch(e) {
@@ -1032,6 +1374,148 @@ function chatWithAgent(agentId) {
   const len = input.value.length;
   input.setSelectionRange(len, len);
   toast(`${meta?.icon || ''} Now chatting with ${name} — type your message and hit Send`, 'success');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── v6: Create / Edit / Delete custom agents ────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+function openCreateAgentModal(editData = null) {
+  const isEdit = !!editData;
+  const title = isEdit ? 'Edit Agent' : 'Create Agent';
+  const sub = isEdit ? 'Update your custom agent settings' : 'Build a new custom AI agent with its own personality and purpose';
+  const btnLabel = isEdit ? 'Save Changes' : 'Create Agent';
+  const modal = document.createElement('div');
+  modal.className = 'create-agent-modal';
+  modal.id = 'createAgentModal';
+  modal.innerHTML = `
+    <div class="create-agent-box">
+      <h3>${title}</h3>
+      <div class="modal-sub">${sub}</div>
+      <div class="form-group">
+        <label class="form-label">Agent ID (lowercase, no spaces)</label>
+        <input class="form-input" id="agentFormId" placeholder="e.g. researcher" ${isEdit ? 'disabled' : ''} value="${isEdit ? escHtml(editData.id) : ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Display Name</label>
+        <input class="form-input" id="agentFormName" placeholder="e.g. Researcher" value="${isEdit ? escHtml(editData.name) : ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Icon (emoji)</label>
+        <input class="form-input" id="agentFormIcon" placeholder="e.g. \uD83D\uDD2C" value="${isEdit ? editData.icon : ''}" style="width:80px">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Description</label>
+        <input class="form-input" id="agentFormDesc" placeholder="What does this agent do?" value="${isEdit ? escHtml(editData.description || editData.role || '') : ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">System Prompt</label>
+        <textarea class="form-input" id="agentFormPrompt" rows="4" placeholder="You are a specialized agent that...">${isEdit ? escHtml(editData.systemPrompt || '') : ''}</textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Model</label>
+        <select class="form-input form-select" id="agentFormModel">
+          <option value="anthropic/claude-sonnet-4">Claude Sonnet 4</option>
+          <option value="anthropic/claude-3.5-haiku">Claude 3.5 Haiku</option>
+          <option value="mistralai/mistral-small">Mistral Small</option>
+          <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
+          <option value="openai/gpt-4.1-mini">GPT-4.1 Mini</option>
+        </select>
+      </div>
+      <div class="create-agent-actions">
+        <button class="btn-cancel" onclick="closeCreateAgentModal()">Cancel</button>
+        <button class="btn-primary" onclick="${isEdit ? `submitEditAgent('${editData.id}')` : 'submitCreateAgent()'}">${btnLabel}</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeCreateAgentModal(); });
+  if (isEdit && editData.model) {
+    document.getElementById('agentFormModel').value = editData.model;
+  }
+}
+
+function closeCreateAgentModal() {
+  const m = document.getElementById('createAgentModal');
+  if (m) m.remove();
+}
+
+async function submitCreateAgent() {
+  const id = document.getElementById('agentFormId').value.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+  const name = document.getElementById('agentFormName').value.trim();
+  const icon = document.getElementById('agentFormIcon').value.trim() || '\uD83E\uDD16';
+  const description = document.getElementById('agentFormDesc').value.trim();
+  const systemPrompt = document.getElementById('agentFormPrompt').value.trim();
+  const model = document.getElementById('agentFormModel').value;
+  if (!name) { toast('Display Name is required', 'error'); return; }
+  if (!systemPrompt) { toast('System Prompt is required', 'error'); return; }
+  try {
+    const r = await fetch(`${APIBASE}/agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id || undefined, name, model, role: description || name, description, icon, systemPrompt })
+    });
+    const d = await r.json();
+    if (!d.success) { toast(d.error || 'Failed to create agent', 'error'); return; }
+    toast(`${icon} Agent "${name}" created!`, 'success');
+    closeCreateAgentModal();
+    loadAgents();
+  } catch(e) {
+    toast('Error creating agent: ' + e.message, 'error');
+  }
+}
+
+async function editAgent(agentId) {
+  // Fetch current agent data from cache or server
+  let agentData = agentsCache.find(a => a.id === agentId);
+  if (!agentData) {
+    toast('Agent not found', 'error');
+    return;
+  }
+  // Fetch full agent data including systemPrompt from server
+  try {
+    const r = await fetch(`${APIBASE}/agents`);
+    const d = await r.json();
+    if (d.success) {
+      const full = d.data.find(a => a.id === agentId);
+      if (full) agentData = full;
+    }
+  } catch(e) {}
+  openCreateAgentModal(agentData);
+}
+
+async function submitEditAgent(agentId) {
+  const name = document.getElementById('agentFormName').value.trim();
+  const icon = document.getElementById('agentFormIcon').value.trim();
+  const description = document.getElementById('agentFormDesc').value.trim();
+  const systemPrompt = document.getElementById('agentFormPrompt').value.trim();
+  const model = document.getElementById('agentFormModel').value;
+  try {
+    const r = await fetch(`${APIBASE}/agents/${agentId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, model, role: description, description, icon, systemPrompt })
+    });
+    const d = await r.json();
+    if (!d.success) { toast(d.error || 'Failed to update agent', 'error'); return; }
+    toast(`Agent "${name}" updated!`, 'success');
+    closeCreateAgentModal();
+    loadAgents();
+  } catch(e) {
+    toast('Error updating agent: ' + e.message, 'error');
+  }
+}
+
+async function deleteAgent(agentId, agentName) {
+  if (!confirm(`Delete custom agent "${agentName}"? This cannot be undone.`)) return;
+  try {
+    const r = await fetch(`${APIBASE}/agents/${agentId}`, { method: 'DELETE' });
+    const d = await r.json();
+    if (!d.success) { toast(d.error || 'Failed to delete agent', 'error'); return; }
+    toast(`Agent "${agentName}" deleted`, 'success');
+    loadAgents();
+  } catch(e) {
+    toast('Error deleting agent: ' + e.message, 'error');
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1159,6 +1643,14 @@ async function loadConnections() {
         ${c.connected
           ? `<div class="conn-status ok">\u2713 ${escHtml(c.accountName || c.id)} · ${timeAgo(c.connectedAt)}</div>
              <button class="btn-disconnect" onclick="disconnectService('${c.id}')">Disconnect</button>`
+          : c.oauthUrl
+          ? `<div class="conn-form">
+               <a href="${c.oauthUrl}" class="btn-connect btn-oauth" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;padding:8px 16px;background:#4285F4;color:#fff;border-radius:6px;font-size:13px;font-weight:600;">
+                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                 Connect with Google
+               </a>
+               <div style="font-size:11px;color:var(--text2);margin-top:6px;">Grants access to Gmail, Drive, Docs, Sheets &amp; Calendar</div>
+             </div>`
           : `<div class="conn-form">
                <input class="conn-input" id="tok-${c.id}" type="password" placeholder="${c.keyBased ? 'API Key or Token' : 'Access Token'}">
                <input class="conn-input" id="acc-${c.id}" placeholder="Account name (optional)">
@@ -1442,12 +1934,6 @@ async function loadPRs() {
   }
 }
 
-function escHtml(s) {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
-}
-
 function confirmMergePR(repo, prNumber, btn) {
   if (deployMerging[prNumber]) return;
 
@@ -1509,7 +1995,495 @@ async function doMergePR(repo, prNumber) {
   }
 }
 
-// ── Init ───────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Content Studio — AI Content Creation Suite ──────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+function switchStudioTool(tool) {
+  document.querySelectorAll('.studio-tool-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.studio-panel').forEach(p => p.classList.remove('active'));
+  document.querySelector(`[data-tool="${tool}"]`).classList.add('active');
+  document.getElementById(`studio-${tool}`).classList.add('active');
+}
+
+async function loadStudioStats() {
+  try {
+    const r = await fetch(`${APIBASE}/content-studio/stats`);
+    const d = await r.json();
+    if (d.success && d.data) {
+      document.getElementById('studioStatTotal').textContent = d.data.total || 0;
+      document.getElementById('studioStatDrafts').textContent = d.data.drafts || 0;
+      document.getElementById('studioStatPublished').textContent = d.data.published || 0;
+      document.getElementById('studioStatAvgScore').textContent = d.data.avgScore || 0;
+    }
+  } catch(e) { console.error('Failed to load studio stats:', e); }
+}
+
+async function loadStudioHistory() {
+  try {
+    const r = await fetch(`${APIBASE}/content-studio/posts`);
+    const d = await r.json();
+    const list = document.getElementById('studioHistoryList');
+    if (!d.success || !d.data || d.data.length === 0) {
+      list.innerHTML = '<div class="empty-state"><div class="empty-icon">📝</div><div>No content yet</div><div style="font-size:12px">Start creating with the tools above</div></div>';
+      return;
+    }
+    list.innerHTML = d.data.map(p => `
+      <div class="studio-history-card">
+        <div class="studio-history-header">
+          <div>
+            <div style="font-size:14px;font-weight:600;margin-bottom:4px">${escHtml(p.title || 'Untitled')}</div>
+            <div class="studio-history-meta">
+              <span class="studio-badge studio-badge-platform">${p.platform}</span>
+              <span class="studio-badge studio-badge-type">${p.content_type}</span>
+              ${p.score ? `<span class="studio-badge studio-badge-score">Score: ${p.score}</span>` : ''}
+              <span class="studio-badge ${p.status === 'published' ? 'studio-badge-published' : 'studio-badge-draft'}">${p.status}</span>
+              <span style="font-size:11px;color:var(--text2)">${timeAgo(p.created_at)}</span>
+            </div>
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="btn-sm" style="background:rgba(6,182,212,0.15);color:#06b6d4;border:1px solid rgba(6,182,212,0.3)" onclick="copyText('${escHtml(p.content)}')">Copy</button>
+            <button class="btn-sm" style="background:rgba(233,69,96,0.15);color:var(--accent);border:1px solid rgba(233,69,96,0.3)" onclick="deleteStudioPost(${p.id})">Delete</button>
+          </div>
+        </div>
+        <div class="studio-history-preview">${escHtml(p.content.substring(0, 150))}${p.content.length > 150 ? '...' : ''}</div>
+      </div>
+    `).join('');
+  } catch(e) { console.error('Failed to load studio history:', e); }
+}
+
+async function runCompose() {
+  const btn = document.getElementById('composeBtn');
+  const topic = document.getElementById('composeTopic').value.trim();
+  if (!topic) return toast('Please enter a topic', 'error');
+  
+  btn.disabled = true;
+  btn.textContent = 'Generating...';
+  
+  try {
+    const r = await fetch(`${APIBASE}/content-studio/compose`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        topic,
+        platform: document.getElementById('composePlatform').value,
+        contentType: document.getElementById('composeType').value,
+        tone: document.getElementById('composeTone').value,
+        audience: document.getElementById('composeAudience').value,
+        keywords: document.getElementById('composeKeywords').value
+      })
+    });
+    const d = await r.json();
+    if (d.success) {
+      document.getElementById('composeOutput').textContent = d.data.content;
+      document.getElementById('composeResult').style.display = 'block';
+      toast('Content generated!', 'success');
+    } else {
+      toast('Error: ' + (d.error || 'Failed to generate'), 'error');
+    }
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Generate Content';
+  }
+}
+
+async function runScore() {
+  const btn = document.getElementById('scoreBtn');
+  const content = document.getElementById('scoreContent').value.trim();
+  if (!content) return toast('Please enter content to score', 'error');
+  
+  btn.disabled = true;
+  btn.textContent = 'Analyzing...';
+  
+  try {
+    const r = await fetch(`${APIBASE}/content-studio/score`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content,
+        platform: document.getElementById('scorePlatform').value
+      })
+    });
+    const d = await r.json();
+    if (d.success && d.data) {
+      const scores = d.data.scores || {};
+      const overall = d.data.overall || 0;
+      const result = document.getElementById('scoreResult');
+      result.innerHTML = `
+        <div class="card" style="border-color:rgba(245,158,11,0.25);margin-top:12px">
+          <div class="card-title" style="color:#f59e0b">Algorithm Analysis</div>
+          <div class="score-overall" style="color:#f59e0b">${overall}/100</div>
+          <div style="margin-bottom:16px">
+            ${Object.entries(scores).map(([k, v]) => `
+              <div class="score-meter">
+                <div class="score-meter-label">${k}</div>
+                <div class="score-meter-track"><div class="score-meter-fill" style="width:${v}%;background:linear-gradient(90deg,#f59e0b,#ef4444)"></div></div>
+                <div class="score-meter-val">${v}</div>
+              </div>
+            `).join('')}
+          </div>
+          <div style="font-size:13px;color:var(--text2);line-height:1.6">${escHtml(d.data.feedback || 'Score analysis complete')}</div>
+        </div>
+      `;
+      result.style.display = 'block';
+      toast('Content scored!', 'success');
+    } else {
+      toast('Error: ' + (d.error || 'Failed to score'), 'error');
+    }
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Analyze Content';
+  }
+}
+
+async function runBrainDump() {
+  const btn = document.getElementById('braindumpBtn');
+  const thoughts = document.getElementById('braindumpThoughts').value.trim();
+  if (!thoughts) return toast('Please share your thoughts', 'error');
+  
+  btn.disabled = true;
+  btn.textContent = 'Transforming...';
+  
+  try {
+    const r = await fetch(`${APIBASE}/content-studio/braindump`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ thoughts })
+    });
+    const d = await r.json();
+    if (d.success && d.data) {
+      const result = document.getElementById('braindumpResult');
+      result.innerHTML = `
+        <div class="studio-result-card" style="border-color:rgba(236,72,153,0.25)">
+          <div class="studio-result-title" style="color:#ec4899">📱 Social Posts</div>
+          <div class="studio-result-content">${escHtml(d.data.posts || 'No posts generated')}</div>
+        </div>
+        <div class="studio-result-card" style="border-color:rgba(99,102,241,0.25)">
+          <div class="studio-result-title" style="color:#6366f1">📄 Article</div>
+          <div class="studio-result-content">${escHtml(d.data.article || 'No article generated')}</div>
+        </div>
+        <div class="studio-result-card" style="border-color:rgba(168,85,247,0.25)">
+          <div class="studio-result-title" style="color:#a855f7">🎬 Video Script</div>
+          <div class="studio-result-content">${escHtml(d.data.script || 'No script generated')}</div>
+        </div>
+      `;
+      result.style.display = 'block';
+      toast('Brain dump transformed!', 'success');
+    } else {
+      toast('Error: ' + (d.error || 'Failed to transform'), 'error');
+    }
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Transform My Thoughts';
+  }
+}
+
+async function runRepurpose() {
+  const btn = document.getElementById('repurposeBtn');
+  const original = document.getElementById('repurposeOriginal').value.trim();
+  if (!original) return toast('Please paste content to repurpose', 'error');
+  
+  btn.disabled = true;
+  btn.textContent = 'Repurposing...';
+  
+  try {
+    const r = await fetch(`${APIBASE}/content-studio/repurpose`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        originalContent: original,
+        sourceAuthor: document.getElementById('repurposeAuthor').value,
+        platform: document.getElementById('repurposePlatform').value,
+        voice: document.getElementById('repurposeVoice').value
+      })
+    });
+    const d = await r.json();
+    if (d.success && d.data) {
+      const result = document.getElementById('repurposeResult');
+      result.innerHTML = `
+        <div class="studio-result-card" style="border-color:rgba(16,185,129,0.25)">
+          <div class="studio-result-title" style="color:#10b981">✨ Your Version</div>
+          <div style="display:flex;gap:8px;margin-bottom:8px">
+            <button class="btn-sm" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3)" onclick="copyStudioContent('repurposeOutput')">Copy</button>
+            <button class="btn-sm" style="background:rgba(139,92,246,0.15);color:#8b5cf6;border:1px solid rgba(139,92,246,0.3)" onclick="scoreFromRepurpose()">Score It</button>
+          </div>
+          <div class="studio-result-content" id="repurposeOutput">${escHtml(d.data.repurposed || 'No content generated')}</div>
+        </div>
+      `;
+      result.style.display = 'block';
+      toast('Content repurposed!', 'success');
+    } else {
+      toast('Error: ' + (d.error || 'Failed to repurpose'), 'error');
+    }
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Repurpose Content';
+  }
+}
+
+async function runCoach() {
+  const btn = document.getElementById('coachBtn');
+  const question = document.getElementById('coachQuestion').value.trim();
+  if (!question) return toast('Ask your coach a question', 'error');
+  
+  btn.disabled = true;
+  btn.textContent = 'Thinking...';
+  
+  try {
+    const r = await fetch(`${APIBASE}/content-studio/coach`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        question,
+        context: document.getElementById('coachHistory').value
+      })
+    });
+    const d = await r.json();
+    if (d.success && d.data) {
+      const result = document.getElementById('coachResult');
+      result.innerHTML = `
+        <div class="studio-result-card" style="border-color:rgba(99,102,241,0.25)">
+          <div class="studio-result-title" style="color:#6366f1">💡 Coach's Advice</div>
+          <div class="studio-result-content">${escHtml(d.data.advice || 'No advice generated')}</div>
+        </div>
+      `;
+      result.style.display = 'block';
+      toast('Advice received!', 'success');
+    } else {
+      toast('Error: ' + (d.error || 'Failed to get advice'), 'error');
+    }
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Get Advice';
+  }
+}
+
+async function runResearch() {
+  const btn = document.getElementById('researchBtn');
+  const account = document.getElementById('researchAccount').value.trim();
+  if (!account) return toast('Enter an account name', 'error');
+  
+  btn.disabled = true;
+  btn.textContent = 'Researching...';
+  
+  try {
+    const r = await fetch(`${APIBASE}/content-studio/research-account`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        account,
+        platform: document.getElementById('researchPlatform').value
+      })
+    });
+    const d = await r.json();
+    if (d.success && d.data) {
+      const result = document.getElementById('researchResult');
+      result.innerHTML = `
+        <div class="studio-result-card" style="border-color:rgba(244,63,94,0.25)">
+          <div class="studio-result-title" style="color:#f43f5e">📊 Account Analysis</div>
+          <div class="studio-result-content">${escHtml(d.data.analysis || 'No analysis available')}</div>
+        </div>
+      `;
+      result.style.display = 'block';
+      toast('Account analyzed!', 'success');
+    } else {
+      toast('Error: ' + (d.error || 'Failed to analyze'), 'error');
+    }
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Analyze Account';
+  }
+}
+
+function copyStudioContent(elementId) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  const text = el.textContent;
+  navigator.clipboard.writeText(text).then(() => toast('Copied!', 'success')).catch(() => toast('Copy failed', 'error'));
+}
+
+function copyText(text) {
+  navigator.clipboard.writeText(text).then(() => toast('Copied!', 'success')).catch(() => toast('Copy failed', 'error'));
+}
+
+function scoreFromCompose() {
+  const content = document.getElementById('composeOutput').textContent;
+  document.getElementById('scoreContent').value = content;
+  switchStudioTool('score');
+  toast('Switched to Score tool', 'success');
+}
+
+function scoreFromRepurpose() {
+  const content = document.getElementById('repurposeOutput').textContent;
+  document.getElementById('scoreContent').value = content;
+  switchStudioTool('score');
+  toast('Switched to Score tool', 'success');
+}
+
+async function deleteStudioPost(id) {
+  if (!confirm('Delete this post?')) return;
+  try {
+    const r = await fetch(`${APIBASE}/content-studio/posts/${id}`, { method: 'DELETE' });
+    const d = await r.json();
+    if (d.success) {
+      toast('Post deleted', 'success');
+      loadStudioHistory();
+      loadStudioStats();
+    } else {
+      toast('Error: ' + (d.error || 'Failed to delete'), 'error');
+    }
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+  }
+}
+// ── Activity Window ─────────────────────────────────────────────────────────────────
+async function loadActivityLive() {
+  try {
+    const r = await fetch(`${APIBASE}/activity/live`);
+    const d = await r.json();
+    const container = document.getElementById('activity-live');
+    if (!d.success || !d.data) { container.innerHTML = '<div style="color:var(--text2)">No activity data</div>'; return; }
+    container.innerHTML = d.data.map(a => {
+      const statusColor = a.status === 'busy' ? 'var(--yellow)' : 'var(--green)';
+      const statusLabel = a.status === 'busy' ? 'Busy' : 'Online';
+      const typeIcon = a.activityType === 'tool_use' ? '\u{1F527}' : a.activityType === 'thinking' ? '\u{1F4AD}' : a.activityType === 'ambient' ? '\u{1F4A4}' : '\u2705';
+      return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;border-left:3px solid ${a.color}">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <span style="font-size:24px">${a.icon}</span>
+          <div>
+            <div style="font-weight:600;font-size:14px">${a.agentName}</div>
+            <div style="display:flex;align-items:center;gap:6px;margin-top:2px">
+              <span style="width:6px;height:6px;border-radius:50%;background:${statusColor};box-shadow:0 0 6px ${statusColor}"></span>
+              <span style="font-size:11px;color:var(--text2)">${statusLabel}</span>
+            </div>
+          </div>
+          <span style="margin-left:auto;font-size:11px;color:var(--text2)">${a.taskCount} tasks</span>
+        </div>
+        <div style="font-size:13px;color:var(--text);background:var(--surface2);padding:8px 12px;border-radius:8px">
+          ${typeIcon} ${a.currentActivity}
+        </div>
+        <div style="font-size:11px;color:var(--text2);margin-top:8px">Last seen: ${new Date(a.lastSeen).toLocaleString()}</div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.error('Activity live error:', e); }
+}
+
+async function loadActivityFeed() {
+  try {
+    const r = await fetch(`${APIBASE}/activity?limit=50`);
+    const d = await r.json();
+    const container = document.getElementById('activity-feed');
+    if (!d.success || !d.data || d.data.length === 0) { container.innerHTML = '<div style="color:var(--text2);padding:12px">No recent activity</div>'; return; }
+    container.innerHTML = d.data.map(a => {
+      const typeColors = { thinking: '#f59e0b', tool_use: '#7c3aed', tool_result: '#10b981', tool_error: '#e94560', ambient: '#4a5568', completed: '#10b981', error: '#e94560' };
+      const color = typeColors[a.activity_type] || '#6b7280';
+      const time = new Date(a.started_at).toLocaleTimeString();
+      return `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--surface);border-radius:8px;border-left:3px solid ${color}">
+        <span style="font-size:11px;color:var(--text2);min-width:70px">${time}</span>
+        <span style="font-weight:600;font-size:12px;min-width:80px;color:${color}">${a.agent_name}</span>
+        <span style="font-size:11px;padding:2px 8px;border-radius:4px;background:${color}20;color:${color}">${a.activity_type}</span>
+        <span style="font-size:13px;color:var(--text);flex:1">${a.description || ''}</span>
+      </div>`;
+    }).join('');
+  } catch(e) { console.error('Activity feed error:', e); }
+}
+
+// Auto-refresh activity every 30 seconds when tab is active
+setInterval(() => {
+  const activityPanel = document.getElementById('panel-activity');
+  if (activityPanel && activityPanel.classList.contains('active')) {
+    loadActivityLive();
+    loadActivityFeed();
+  }
+}, 30000);
+
+// ── Skills Vault ───────────────────────────────────────────────────────────────────
+let allSkills = [];
+async function loadSkills() {
+  const grid = document.getElementById('skillsGrid');
+  const countEl = document.getElementById('skillCount');
+  const catFilter = document.getElementById('skillCategoryFilter');
+  grid.innerHTML = '<div style="color:var(--text2);font-size:13px">Loading skills...</div>';
+  try {
+    const r = await fetch(`${APIBASE}/skills?limit=500`);
+    const d = await r.json();
+    if (!d.success) throw new Error(d.error);
+    allSkills = d.data || [];
+    // Populate category filter
+    const existing = Array.from(catFilter.options).map(o => o.value);
+    (d.categories || []).forEach(cat => {
+      if (!existing.includes(cat)) {
+        const opt = document.createElement('option');
+        opt.value = cat; opt.textContent = cat;
+        catFilter.appendChild(opt);
+      }
+    });
+    renderSkills(allSkills);
+    countEl.textContent = `${allSkills.length} skills`;
+  } catch(e) {
+    grid.innerHTML = `<div style="color:var(--accent);font-size:13px">Error loading skills: ${e.message}</div>`;
+  }
+}
+function filterSkills() {
+  const q = (document.getElementById('skillSearch').value || '').toLowerCase();
+  const cat = document.getElementById('skillCategoryFilter').value;
+  const filtered = allSkills.filter(s => {
+    const matchQ = !q || s.name.toLowerCase().includes(q) || (s.description||'').toLowerCase().includes(q) || (s.category||'').toLowerCase().includes(q);
+    const matchCat = !cat || s.category === cat;
+    return matchQ && matchCat;
+  });
+  renderSkills(filtered);
+  document.getElementById('skillCount').textContent = `${filtered.length} of ${allSkills.length} skills`;
+}
+function renderSkills(skills) {
+  const grid = document.getElementById('skillsGrid');
+  if (!skills.length) {
+    grid.innerHTML = '<div style="color:var(--text2);font-size:13px">No skills found.</div>';
+    return;
+  }
+  const sourceColors = { 'revvel-custom': '#7c3aed', 'revvel-expert': '#e94560' };
+  grid.innerHTML = skills.map(s => {
+    const color = sourceColors[s.source] || '#10b981';
+    const tags = (s.tags || []).slice(0, 4).map(t => `<span style="background:rgba(124,58,237,0.15);color:#a78bfa;padding:2px 7px;border-radius:10px;font-size:10px">${t}</span>`).join(' ');
+    const safeName = s.name.replace(/'/g, '&#39;');
+    return `<div class="card" style="cursor:pointer;border-color:rgba(124,58,237,0.2);transition:border-color .15s" onclick="invokeSkill('${s.id}','${safeName}')" onmouseover="this.style.borderColor='${color}'" onmouseout="this.style.borderColor='rgba(124,58,237,0.2)'">>
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px">
+        <div style="font-size:14px;font-weight:600;color:var(--text)">${s.name}</div>
+        <span style="background:${color}22;color:${color};padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;white-space:nowrap">${s.source}</span>
+      </div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:8px;line-height:1.5">${(s.description||'').slice(0,120)}${(s.description||'').length>120?'...':''}</div>
+      <div style="font-size:11px;color:var(--accent2);margin-bottom:6px">${s.category}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px">${tags}</div>
+    </div>`;
+  }).join('');
+}
+function invokeSkill(skillId, skillName) {
+  // Switch to chat tab and pre-fill a message invoking this skill
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelector('[data-tab="chat"]').classList.add('active');
+  document.getElementById('panel-chat').classList.add('active');
+  const input = document.getElementById('chatInput');
+  if (input) {
+    input.value = `@rex Use the ${skillName} skill to help me with: `;
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  }
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────────────
 async function init() {
   try {
     const r = await fetch(`${APIBASE}/health`);
