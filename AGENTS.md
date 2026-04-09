@@ -206,36 +206,46 @@ Before declaring work complete:
 ## Project-Specific Context
 
 ### What This Project Is
-Sessiono — session musician subscription platform. Users browse, book, and pay session musicians. Musicians list their services, set rates, and manage bookings.
+MindMappr — AI agent command center for autonomous business operations. Orchestrates multiple AI agents (Rex, Watcher, Scheduler, Processor, Generator, Lex) to manage infrastructure, generate content, monitor markets, process data, handle legal compliance, and run the Freedom Angel Corps / Digital Arbitrage Academy business.
+
+Owner: Audrey Evans (Revvel, @midnghtsapphire, GlowStarLabs). Email: angelreporters@gmail.com.
 
 ### Architecture
 ```
-app/                    # Expo Router file-based routing
-  (tabs)/               # Bottom tab navigation
-    index.tsx           # Home — browse featured musicians
-    search.tsx          # Search by instrument/genre
-    bookings.tsx        # My bookings list
-    profile.tsx         # User profile + subscription
-  auth/login.tsx        # Login/signup modal
-  musician/[id].tsx     # Musician detail + booking
-components/             # Reusable UI components
-lib/supabase.ts         # Supabase client with SecureStore
-constants/              # Theme, config
+server.mjs              # Backend: Express, API endpoints, agent orchestration, SQLite, cron
+rex-tools.mjs           # 21+ real API tools for Rex (GitHub, DO, Discord, Stripe, Google, etc.)
+discord-connector.mjs   # Discord bot integration
+github-sync.mjs         # GitHub-backed data persistence
+src/App.tsx             # React frontend (Vite build)
+public/index.html       # SPA frontend (no build step)
+skills-catalog.json     # 260+ OpenClaw skills registry
+data/mindmappr.db       # SQLite database (runtime)
+data/MEMORY.md          # Long-term agent memory
+data/soul.md            # Agent personality
+data/user.md            # Owner profile
+tests/smoke-test.mjs    # Pre-deploy smoke test
+docs/                   # DARE, RAID, contracts, use cases, testing, etc.
 ```
 
 ### Key Commands
 ```bash
-npx expo start          # Dev server (scan QR with Expo Go)
-npx expo start --web    # Web dev server
-eas build --platform all  # Build for iOS + Android
-eas submit --platform ios  # Submit to App Store
+npm install             # Install deps (needs Node.js 20+, make, g++, python3)
+npm start               # Run server on http://localhost:3005
+npm test                # Run smoke tests
+node --check server.mjs # Syntax check
 ```
 
-### Current State
-- UI scaffolding complete with dark cinematic theme
-- Demo data in place — needs Supabase integration
-- Auth screen built — needs Supabase auth wiring
-- Stripe subscription integration not started
-- Musician profile photos not implemented (use expo-image)
-- Push notifications not implemented
-- Search is static — needs Supabase full-text search
+### Current State (v9.4.0)
+- Full agent orchestration with 6 built-in agents + custom agents
+- 21+ real Rex tools (GitHub, DO, Discord, Stripe, Google Workspace, web search, media generation)
+- SQLite persistence, GitHub sync backup
+- Content Studio (compose, score, braindump, repurpose)
+- Activity Window (real-time agent status)
+- Deploy Tab (GitHub PR management)
+- 260+ skills cataloged (not all executable yet)
+- Discord and Telegram bot connectors
+- Branch protection enforced after April 3 incident
+- Social media automation module: NOT YET BUILT
+- CRM module: NOT YET BUILT
+- Autonomous trading interface: NOT YET BUILT
+- See docs/DEPLOYMENT_CONTRACT.md for full scope
