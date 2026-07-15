@@ -1,5 +1,12 @@
 # MindMappr
 
+
+<!-- AUTO-PACKAGE-BADGES:START -->
+<!-- Auto-generated package badges -->
+
+![npm version](https://img.shields.io/npm/v/mindmappr-web?style=flat-square&logo=npm&color=blue) ![npm downloads](https://img.shields.io/npm/dw/mindmappr-web?style=flat-square&color=brightgreen) ![npm license](https://img.shields.io/npm/l/mindmappr-web?style=flat-square) [![Deployed](https://img.shields.io/badge/deployed-9.4.0-blue?style=flat-square)](https://www.npmjs.com/package/mindmappr-web)
+
+<!-- AUTO-PACKAGE-BADGES:END -->
 **AI-Powered GitHub Project Management Platform**
 
 MindMappr is a comprehensive GitHub project management tool with AI-driven workflow automation.
