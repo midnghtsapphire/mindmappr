@@ -23,7 +23,6 @@ const PORT = parseInt(process.env.PORT || "3005");
 // Resolve LLM key: prefer LLM_API_KEY, fall back to OPENROUTER_API_KEY
 const LLM_API_KEY = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || "";
 const LLM_BASE_URL = "https://openrouter.ai/api/v1";
-const LLM_MODEL = process.env.LLM_MODEL || "anthropic/claude-sonnet-4-6";
 const LLM_MODEL = process.env.LLM_MODEL || "anthropic/claude-sonnet-4";
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
@@ -35,7 +34,7 @@ const DATA_DIR = join(__dirname, "data");
 // Google OAuth2 configuration
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
-const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "";
+const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || `http://localhost:${PORT}/api/google/callback`;
 
 const MEMORY_DIR = join(DATA_DIR, "memory");
 const MEMORY_FILE = join(DATA_DIR, "MEMORY.md");
@@ -518,6 +517,10 @@ function autoConnectServices() {
     { id: "elevenlabs", token: process.env.ELEVENLABS_API_KEY, name: "ElevenLabs" },
     { id: "stripe", token: process.env.STRIPE_SECRET_KEY, name: "Stripe" },
     { id: "brave_search", token: process.env.BRAVE_SEARCH_API_KEY, name: "Brave Search" },
+    { id: "leonardo", token: process.env.LEONARDO_API_KEY, name: "Leonardo AI" },
+    { id: "openai", token: process.env.OPENAI_API_KEY, name: "OpenAI" },
+    { id: "heygen", token: process.env.HEYGEN_API_KEY, name: "HeyGen" },
+    { id: "google_maps", token: process.env.GOOGLE_MAPS_API_KEY, name: "Google Maps" },
   ];
   for (const { id, token, name } of connections) {
     if (!token) continue;
@@ -1065,7 +1068,8 @@ RULES:
 5. Structure responses as: Threat Summary → Risk Level → Indicators → Remediation → Prevention
 6. Coordinate with Forensic agent for active incidents
 
-Owner: Audrey Evans. Security posture is a priority — be thorough and decisive.
+Owner: Audrey Evans. Security posture is a priority — be thorough and decisive.`
+  },
   telegram: {
     name: "MindMappr Bot",
     model: "anthropic/claude-sonnet-4",
@@ -1839,7 +1843,6 @@ async function callLLM(messages, model) {
         "HTTP-Referer": "https://meetaudreyevans.com",
         "X-Title": "MindMappr"
       },
-      body: JSON.stringify({ model: m, messages, max_tokens: 4096, temperature: 0.7 })
       body: JSON.stringify({ model: m, messages, max_tokens: 16384, temperature: 0.7 })
     });
     if (!r.ok) { const t = await r.text(); throw new Error(`LLM ${r.status}: ${t.slice(0, 200)}`); }
@@ -1900,8 +1903,8 @@ async function executeTool(tool, params) {
       const fname = `img_${Date.now()}.png`;
       const fpath = join(UPLOADS_DIR, fname);
 
-      const LEONARDO_KEY = process.env.LEONARDO_API_KEY;
-      const OPENAI_KEY = process.env.OPENAI_API_KEY;
+      const LEONARDO_KEY = getConnectionToken("leonardo") || process.env.LEONARDO_API_KEY;
+      const OPENAI_KEY = getConnectionToken("openai") || process.env.OPENAI_API_KEY;
 
       let imageUrl = null;
 
@@ -1983,8 +1986,8 @@ async function executeTool(tool, params) {
   // ── Create video (HeyGen AI) ──
   if (tool === "create_video") {
     return await withRetry(async () => {
-      const HEYGEN_KEY = process.env.HEYGEN_API_KEY;
-      if (!HEYGEN_KEY) throw new Error("HeyGen API key not configured. Set HEYGEN_API_KEY env var.");
+      const HEYGEN_KEY = getConnectionToken("heygen") || process.env.HEYGEN_API_KEY;
+      if (!HEYGEN_KEY) throw new Error("HeyGen not configured. Add your HeyGen key in Connections tab or set HEYGEN_API_KEY env var.");
 
       const script = params.script || params.text || params.content || "Hello from MindMappr!";
       const avatarId = params.avatar_id || "Angela-inblackskirt-20220820"; // default HeyGen avatar
@@ -2806,8 +2809,8 @@ async function executeTool(tool, params) {
 
   // ── Stripe: List Customers ──
   if (tool === "stripe_list_customers") {
-    const STRIPE_KEY = process.env.STRIPE_SECRET_KEY;
-    if (!STRIPE_KEY) return { success: false, error: "Stripe not configured. Set STRIPE_SECRET_KEY env var." };
+    const STRIPE_KEY = getConnectionToken("stripe") || process.env.STRIPE_SECRET_KEY;
+    if (!STRIPE_KEY) return { success: false, error: "Stripe not configured. Add your Stripe key in Connections tab or set STRIPE_SECRET_KEY env var." };
     return await withRetry(async () => {
       const limit = Math.min(params.limit || 10, 100);
       const r = await fetch(`https://api.stripe.com/v1/customers?limit=${limit}`, {
@@ -2825,8 +2828,8 @@ async function executeTool(tool, params) {
 
   // ── Stripe: List Payments ──
   if (tool === "stripe_list_payments") {
-    const STRIPE_KEY = process.env.STRIPE_SECRET_KEY;
-    if (!STRIPE_KEY) return { success: false, error: "Stripe not configured. Set STRIPE_SECRET_KEY env var." };
+    const STRIPE_KEY = getConnectionToken("stripe") || process.env.STRIPE_SECRET_KEY;
+    if (!STRIPE_KEY) return { success: false, error: "Stripe not configured. Add your Stripe key in Connections tab or set STRIPE_SECRET_KEY env var." };
     return await withRetry(async () => {
       const limit = Math.min(params.limit || 10, 100);
       const r = await fetch(`https://api.stripe.com/v1/payment_intents?limit=${limit}`, {
@@ -2844,8 +2847,8 @@ async function executeTool(tool, params) {
 
   // ── Stripe: Create Invoice ──
   if (tool === "stripe_create_invoice") {
-    const STRIPE_KEY = process.env.STRIPE_SECRET_KEY;
-    if (!STRIPE_KEY) return { success: false, error: "Stripe not configured. Set STRIPE_SECRET_KEY env var." };
+    const STRIPE_KEY = getConnectionToken("stripe") || process.env.STRIPE_SECRET_KEY;
+    if (!STRIPE_KEY) return { success: false, error: "Stripe not configured. Add your Stripe key in Connections tab or set STRIPE_SECRET_KEY env var." };
     return await withRetry(async () => {
       const customerId = params.customer_id;
       const items = params.items;
@@ -2887,7 +2890,7 @@ async function executeTool(tool, params) {
     const numResults = Math.min(params.numResults || 5, 10);
 
     // Try Brave Search API first
-    const BRAVE_KEY = process.env.BRAVE_SEARCH_API_KEY;
+    const BRAVE_KEY = getConnectionToken("brave_search") || process.env.BRAVE_SEARCH_API_KEY;
     if (BRAVE_KEY) {
       return await withRetry(async () => {
         const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${numResults}`;
@@ -5226,3 +5229,4 @@ app.listen(PORT, () => {
     }, 60000);
   }
 });
+}
