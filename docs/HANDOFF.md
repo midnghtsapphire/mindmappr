@@ -1,109 +1,219 @@
 # HANDOFF: MindMappr Command Center
 
-This document provides a comprehensive guide for anyone taking over the MindMappr Command Center project.
+**Version:** 9.4.0
+**Last Updated:** 2026-11-07
+**Owner:** Audrey Evans (Revvel, @midnghtsapphire, GlowStarLabs)
+**Governance:** revvel-standards (github.com/midnghtsapphire/revvel-standards) is the SSOT for all MIDNGHTSAPPHIRE projects. Read it first.
 
-## Architecture Overview
+---
 
-MindMappr is a self-contained Node.js application designed as a single-file server (`server.mjs`) for ease of deployment. It orchestrates multiple AI agents, manages connections to external services, and provides a modern web interface.
+## Read Order for New Agent/Developer
 
-The core logic resides in `server.mjs`. This file handles Express routing, API endpoints, agent orchestration (routing messages to specific LLMs via OpenRouter), database interactions (SQLite), and file management.
+1. `revvel-standards/AGENTS.md` — 25 owner rules (NEVER delete, draft PR only, etc.)
+2. `revvel-standards/START_HERE_CALL_CHAIN.md` — WR pipeline flow
+3. `revvel-standards/MASTER.md` — UPREV method, conflict resolution
+4. This file — MindMappr-specific state
+5. `docs/DEPLOYMENT_CONTRACT.md` — full autonomous ops contract
+6. `docs/RAID.md` — what's broken and why
+7. `docs/DEVELOPMENT_FLOW.md` — EXRUP + Ralph Loop methodology
+8. `AGENTS.md` (in this repo) — prime directive + architecture
 
-The `rex-tools.mjs` module contains 21 executable functions specifically designed for the Rex agent. These tools enable autonomous interactions with GitHub (creating repos, managing PRs), DigitalOcean (managing droplets and apps), and other services.
+---
 
-The frontend is a Single Page Application (SPA) located entirely within `public/index.html`. It uses a glassmorphism UI and communicates with the backend via REST APIs. There is no build step required for the frontend.
+## Architecture
 
-Data persistence is handled by a SQLite database (`data/mindmappr.db`), ensuring that user preferences, connections, API keys, and agent memory survive container restarts on ephemeral hosting platforms.
+```
+server.mjs              # Backend: Express, agents, SQLite, cron, OAuth (~3k+ lines)
+rex-tools.mjs           # 21+ Rex tools (GitHub, DO, Discord, Stripe, Google, search, media)
+discord-connector.mjs   # Discord bot (MindMappr Bot#2654)
+github-sync.mjs         # Pushes data/ to midnghtsapphire/mindmappr-data every 30s
+src/App.tsx             # React frontend (Vite)
+public/index.html       # SPA frontend (no build step, glassmorphism UI)
+skills-catalog.json     # 260+ OpenClaw skills registry (Manus entries removed)
+data/mindmappr.db       # SQLite (runtime, ephemeral on DO — github-sync backs it up)
+data/MEMORY.md          # Long-term agent memory
+data/soul.md            # Agent personality
+data/user.md            # Owner profile
+tests/smoke-test.mjs    # Pre-deploy smoke test
+docs/                   # DARE, RAID, contracts, use cases, testing strategy, etc.
+.env.example            # All credential placeholders
+```
 
-## How to Run Locally
+---
 
-To run MindMappr locally for development or testing:
+## How to Run
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/midnghtsapphire/mindmappr.git
-    cd mindmappr
-    ```
-2.  **Install dependencies:** Ensure you have Node.js 20+ installed. The `better-sqlite3` package requires native build tools (e.g., `make`, `g++`, `python3`).
-    ```bash
-    npm install
-    ```
-3.  **Set environment variables:** Create a `.env` file in the root directory (see "Environment Variables Needed" below).
-4.  **Start the server:**
-    ```bash
-    npm start
-    ```
-5.  **Access the application:** Open your browser and navigate to `http://localhost:3005`.
+### Local (recommended for development)
+```bash
+git clone https://github.com/midnghtsapphire/mindmappr.git
+cd mindmappr
+npm install          # Node.js 20+, needs make/g++/python3 for better-sqlite3
+cp .env.example .env # Fill in your keys
+npm start            # http://localhost:3005
+```
 
-## How to Deploy
+Google OAuth works on localhost. This is the path that actually works for connections.
 
-MindMappr is optimized for deployment on DigitalOcean App Platform.
+### DigitalOcean App Platform (production)
+1. Connect GitHub repo → master branch
+2. Dockerfile auto-detected, run command: `node server.mjs`
+3. Set env vars in DO console (see .env.example for full list)
+4. github-sync.mjs backs up data/ to midnghtsapphire/mindmappr-data every 30s (requires GITHUB_PAT)
 
-1.  **Connect your GitHub repository** to DigitalOcean App Platform.
-2.  **Select the MindMappr repository** and the `master` branch.
-3.  **Configure the App:** DO App Platform should automatically detect the `Dockerfile`. Ensure the run command is `node server.mjs`.
-4.  **Set Environment Variables:** Add the required environment variables (e.g., `APP_PASSWORD`, `LLM_API_KEY`) in the App Platform configuration.
-5.  **Deploy:** Trigger the deployment. The SQLite database will persist across redeployments on the App Platform.
+**WARNING:** DO containers are ephemeral. SQLite, memory files, custom agents, and connections get wiped on redeploy/restart unless github-sync is running with a valid GITHUB_PAT.
 
-## Environment Variables Needed
+---
 
-The following environment variables are required or highly recommended:
+## What Works (November 2026)
 
-*   `PORT`: The port the server will listen on (default is 3005).
-*   `APP_PASSWORD`: The password required to access the MindMappr UI.
-*   `LLM_API_KEY`: Your OpenRouter API key (or OpenAI key if overriding the base URL). This is required for all agent LLM calls.
-*   `LLM_MODEL`: The default LLM model to use (default is `anthropic/claude-sonnet-4`).
-*   `GITHUB_PAT`: A GitHub Personal Access Token with repo scopes, required for Rex's GitHub tools (can also be set in the UI Connections tab).
-*   `DO_API_TOKEN`: A DigitalOcean API token, required for Rex's DO tools (can also be set in the UI Connections tab).
+| Feature | Status |
+|---------|--------|
+| Agent chat (Rex, Watcher, Scheduler, Processor, Generator, Lex) | WORKING |
+| Rex GitHub tools (repos, PRs, files) | WORKING (with GITHUB_PAT) |
+| Rex DigitalOcean tools (droplets, apps) | WORKING (with DO_API_TOKEN) |
+| Web search (Brave → Google → DDG fallback) | WORKING (with BRAVE_SEARCH_API_KEY) |
+| PDF generation (pdfkit) | WORKING |
+| Spreadsheet creation (exceljs) | WORKING |
+| Discord bot | WORKING (with DISCORD_BOT_TOKEN) |
+| Telegram bot | WORKING (with TELEGRAM_BOT_TOKEN) |
+| Content Studio (compose, score, braindump, repurpose) | WORKING |
+| Activity Window | WORKING |
+| Deploy Tab (PR management) | WORKING |
+| Custom agent creation | WORKING (lost on container restart without github-sync) |
+| Branch protection | ENFORCED (after April 3 incident) |
+| Smoke test CI | WORKING |
 
-## Database Schema
+## What's Broken / Not Built
 
-The SQLite database (`mindmappr.db`) contains the following key tables:
+| Feature | Status | Root Cause |
+|---------|--------|-----------|
+| Google OAuth (Gmail, Drive, Docs, Sheets, Calendar) | BROKEN | OAuth redirect URI mismatch on DO; works on localhost |
+| Connections panel wiring | COSMETIC | Tokens saved to DB but many tools don't actually read them |
+| Skill loading (260+ catalog) | 404s on most | Skills designed for OpenClaw, not MindMappr's execution model |
+| Social media automation module | NOT BUILT | No Twitter/Reddit/LinkedIn API integration in rex-tools.mjs |
+| CRM module | NOT BUILT | No lead tracking, scoring, or follow-up system |
+| Autonomous trading interface | NOT BUILT | No Alpaca/Coinbase API integration |
+| Analytics dashboard (revenue tracking) | NOT BUILT | No PayPal/Stripe data aggregation |
+| Multi-agent delegation | NOT REAL | Agents don't actually delegate between each other |
+| Nightly memory consolidation | NOT BUILT | No 2AM cron job for memory consolidation |
+| Ralph Loop (autonomous iteration) | NOT BUILT | No heartbeat, no session tracking |
+| Email sending/receiving | BROKEN | Google OAuth not connected |
+| Unit/integration tests | NONE | Only smoke-test.mjs exists |
+| Prompt injection defense | NONE | No sanitization layer |
+| HITL for destructive actions | NONE | Tools execute immediately |
 
-*   `user_preferences`: Key-value store for UI settings.
-*   `facts`: Long-term memory for agents, storing categorized facts.
-*   `conversation_summaries`: Summaries of past chat sessions.
-*   `project_context`: Details about ongoing projects.
-*   `scheduled_tasks`: Configuration for cron jobs.
-*   `agent_tasks`: History of all tasks executed by agents, including status and cost.
-*   `custom_agents`: Definitions for user-created agents.
-*   `agent_activity`: Real-time logs of agent actions for the Activity Window.
-*   `connections`: Secure storage for external service tokens (e.g., GitHub, Slack).
-*   `content_studio_posts`: Storage for content generated in the Content Studio.
-*   `content_studio_inspirations`: Storage for repurposed content sources.
-*   `content_studio_braindumps`: Storage for raw thoughts and generated drafts.
-*   `content_studio_analytics`: Performance metrics for published content.
+---
 
-## API Endpoint Reference
+## LLM Layer 0 Rule (from revvel-standards)
 
-Key API endpoints include:
+Local LLMs first. `REVVEL_LLM_ALLOW_CLOUD` must be `"1"` to spend on cloud LLMs.
 
-*   `POST /api/auth/login`: Authenticate with `APP_PASSWORD`.
-*   `GET /api/health`: Check server status and available features.
-*   `POST /api/chat`: Send a message to the default agent.
-*   `POST /api/agents/:name/invoke`: Invoke a specific built-in or custom agent.
-*   `GET /api/agents`: List all available agents and their current status.
-*   `GET /api/activity/live`: Get real-time status for the Activity Window.
-*   `GET /api/tools`: List all available Rex tools.
-*   `POST /api/tools/execute`: Manually execute a Rex tool.
-*   `GET /api/connections/list`: List configured external connections.
-*   `POST /api/schedule`: Create a new scheduled task.
-*   `POST /api/content-studio/compose`: Generate content using the CreatorBuddy suite.
+Fallback chain: LM Studio → Ollama → OpenRouter
 
-## Agent System Overview
+This was created after ~$80 of OpenRouter spend appeared in one day. MindMappr currently violates this — it goes straight to OpenRouter. Future work: add LM Studio/Ollama support to the LLM routing in server.mjs.
 
-MindMappr employs a specialized workforce of AI agents, each with a defined role and system prompt:
+---
 
-*   **Rex:** The lead infrastructure agent. He uses `rex-tools.mjs` to manage GitHub repos, deploy to DigitalOcean, and execute complex workflows.
-*   **Watcher:** The monitoring agent. Focuses on system health, API response times, and log analysis.
-*   **Scheduler:** The automation agent. Manages cron jobs and recurring tasks.
-*   **Processor:** The data agent. Handles fast data operations, parsing, and extraction.
-*   **Generator:** The content agent. Powers the Content Studio, creating blog posts, marketing copy, and reports.
+## Key Env Vars (see .env.example for all)
 
-Users can also create **Custom Agents** with specific models and instructions via the UI.
+| Var | Required | Purpose |
+|-----|----------|---------|
+| PORT | No (default 3005) | Server port |
+| APP_PASSWORD | YES | Login password |
+| LLM_API_KEY | YES | OpenRouter key |
+| GITHUB_PAT | YES for Rex tools + github-sync | GitHub Personal Access Token |
+| DO_API_TOKEN | For DO management | DigitalOcean API token |
+| DISCORD_BOT_TOKEN | For Discord bot | Discord bot token |
+| TELEGRAM_BOT_TOKEN | For Telegram bot | Telegram bot token |
+| GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI | For Google Workspace | Google OAuth2 |
+| STRIPE_SECRET_KEY | For payments | Stripe API key |
+| BRAVE_SEARCH_API_KEY | For web search | Brave Search |
 
-## Known Issues and Tech Debt
+---
 
-*   **Single-File Architecture:** `server.mjs` is very large. Consider refactoring into separate modules (e.g., routing, database, agent logic) if the project grows significantly.
-*   **Branch Protection:** The repository currently lacks branch protection rules, which led to the April 3 force-push incident. This must be implemented immediately to enforce PR workflows.
-*   **Test Coverage:** There is currently no automated test suite. Adding unit tests for `rex-tools.mjs` and API endpoints is highly recommended.
-*   **Rate Limiting:** While the Generator agent has a basic rate limit, more robust rate limiting across all API endpoints should be implemented for production deployments.
+## Database Schema (SQLite — mindmappr.db)
+
+| Table | Purpose |
+|-------|---------|
+| user_preferences | UI settings (key-value) |
+| facts | Long-term agent memory (categorized facts) |
+| conversation_summaries | Chat session summaries |
+| project_context | Project details |
+| scheduled_tasks | Cron job configs |
+| agent_tasks | Task history (status, cost) |
+| custom_agents | User-created agents (lost on container restart) |
+| agent_activity | Real-time action logs (Activity Window) |
+| connections | API tokens for external services |
+| content_studio_posts | Generated content |
+| content_studio_inspirations | Repurposed content sources |
+| content_studio_braindumps | Raw ideas and drafts |
+| content_studio_analytics | Content performance metrics |
+| skills | Loaded skill registry |
+
+---
+
+## Agent Roster
+
+| Agent | Role | Model | Key Tools |
+|-------|------|-------|-----------|
+| Rex | CEO / Infrastructure | Claude Sonnet | 21+ rex-tools (GitHub, DO, Discord, Stripe, Google, search, media) |
+| Watcher | Monitoring | Claude Sonnet | System health, logs, anomaly detection |
+| Scheduler | Automation | Mistral Small | Cron jobs, task scheduling |
+| Processor | Data | Claude Sonnet | Parsing, extraction, fast data ops |
+| Generator | Content | Claude Sonnet | Content Studio, reports, social posts |
+| Lex | Legal Counsel | Claude Sonnet | Contracts, ToS, compliance, legal research |
+
+---
+
+## API Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | /api/auth/login | Authenticate with APP_PASSWORD |
+| GET | /api/health | Server status and version |
+| POST | /api/chat | Message default agent |
+| POST | /api/agents/:name/invoke | Message specific agent |
+| GET | /api/agents | List all agents |
+| GET | /api/activity/live | Activity Window data |
+| GET | /api/tools | List Rex tools |
+| POST | /api/tools/execute | Execute a Rex tool |
+| GET | /api/connections/list | List connections |
+| POST | /api/schedule | Create scheduled task |
+| POST | /api/content-studio/compose | Generate content |
+| GET | /api/agents/rex/skills | Skills registry |
+| GET | /api/google/auth | Start Google OAuth flow |
+| GET | /api/google/callback | Google OAuth callback |
+
+---
+
+## Connected Repos
+
+| Repo | Relationship |
+|------|-------------|
+| midnghtsapphire/mindmappr | This repo (app code) |
+| midnghtsapphire/mindmappr-data | github-sync backup target (SQLite + memory files) |
+| midnghtsapphire/revvel-standards | SSOT for governance, standards, skills, templates |
+| midnghtsapphire/revvel-skills-vault | Rex YAML skills (loaded via load_skill tool) |
+| midnghtsapphire/reese-reviews | Review platform (in Deploy tab) |
+
+---
+
+## Priority Fix Order
+
+1. **Fix Google OAuth** — change GOOGLE_REDIRECT_URI to match actual deployment URL. Test on localhost first.
+2. **Wire connections to tools** — getConnectionToken() exists but many tools don't call it.
+3. **Add unit tests** — rex-tools.mjs functions, API endpoint tests, connection health checks.
+4. **Build social media module** — Twitter API v2, Reddit API in rex-tools.mjs.
+5. **Build nightly consolidation** — 2AM cron in Scheduler agent.
+6. **Build Ralph Loop** — heartbeat cron, session tracking, autonomous iteration.
+
+---
+
+## What NOT to Do (from revvel-standards Owner Rules)
+
+- NEVER delete files, code, docs, or rules
+- NEVER rewrite/overwrite existing work wholesale
+- To retire something, COMMENT IT OUT with dated note
+- All changes via draft PR for owner review
+- Agents never merge their own PRs
+- Everything worked on goes in the repo. EVERYTHING.
