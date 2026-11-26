@@ -1197,7 +1197,7 @@ function getGeneratorCallsThisHour() {
 // 2026-11-26: retired duplicate function header from a merge. The live function follows.
 // async function callAgentLLM(agentName, messages, maxTokens = 4096) {
 //   const agent = AGENT_DEFINITIONS[agentName];
-async function callAgentLLM(agentName, messages, maxTokens = 16384) {
+async function callAgentLLM(agentName, messages, maxTokens = 16384, options = {}) {
   const allDefs = getAllAgentDefinitions();
   const agent = allDefs[agentName];
   if (!agent) throw new Error(`Unknown agent: ${agentName}`);
@@ -1205,14 +1205,16 @@ async function callAgentLLM(agentName, messages, maxTokens = 16384) {
   const model = agent.model;
   const startTime = Date.now();
 
-  const local = await tryLearnedLocalAnswer(messages);
-  if (local.ok && typeof local.text === "string") {
-    const elapsed = Date.now() - startTime;
-    if (agentState[agentName]) {
-      agentState[agentName].lastActivity = new Date().toISOString();
-      agentState[agentName].taskCount++;
+  if (options.useLocalNotes) {
+    const local = await tryLearnedLocalAnswer(messages, { maxTokens });
+    if (local.ok && typeof local.text === "string") {
+      const elapsed = Date.now() - startTime;
+      if (agentState[agentName]) {
+        agentState[agentName].lastActivity = new Date().toISOString();
+        agentState[agentName].taskCount++;
+      }
+      return { text: local.text, usage: {}, elapsed, model };
     }
-    return { text: local.text, usage: {}, elapsed, model: local.model || "lm-studio" };
   }
 
   const response = await fetch(`${LLM_BASE_URL}/chat/completions`, {
@@ -1251,7 +1253,7 @@ async function callAgentLLM(agentName, messages, maxTokens = 16384) {
 /**
  * Invoke an agent with a user message, log to task history
  */
-async function invokeAgent(agentName, userMessage, sessionId = null) {
+async function invokeAgent(agentName, userMessage, sessionId = null, options = {}) {
   const allDefs = getAllAgentDefinitions();
   const agent = allDefs[agentName];
   if (!agent) throw new Error(`Unknown agent: ${agentName}`);
@@ -1296,7 +1298,7 @@ async function invokeAgent(agentName, userMessage, sessionId = null) {
     // Log activity
     logActivity(agentName, agent.name, "thinking", `Processing: ${userMessage.slice(0, 80)}...`);
 
-    const result = await callAgentLLM(agentName, messages);
+    const result = await callAgentLLM(agentName, messages, 16384, options);
     let finalText = result.text;
     let totalInputTokens = result.usage.prompt_tokens || 0;
     let totalOutputTokens = result.usage.completion_tokens || 0;
@@ -1593,7 +1595,7 @@ app.post("/api/telegram/webhook", async (req, res) => {
 
     // Route through Rex agent
     logActivity("rex", "Rex", "telegram", `Telegram from ${userName}: ${userText.slice(0, 80)}`);
-    const result = await invokeAgent("rex", `[Telegram from ${userName}] ${userText}`, `tg-${chatId}`);
+    const result = await invokeAgent("rex", `[Telegram from ${userName}] ${userText}`, `tg-${chatId}`, { useLocalNotes: true });
     await sendTelegramMessage(chatId, result.text);
     res.json({ ok: true });
   } catch (err) {
@@ -1846,9 +1848,11 @@ Owner: Audrey Evans, AuDHD, 60, cancer survivor. Daughter is legally deaf. Be wa
 const knowledgeIndex = new KnowledgeIndex();
 const learnSkipLog = new Set();
 
-async function tryLearnedLocalAnswer(messages) {
+async function tryLearnedLocalAnswer(messages, options = {}) {
   try {
-    const result = await knowledgeIndex.answer(Array.isArray(messages) ? messages : []);
+    const result = await knowledgeIndex.answer(Array.isArray(messages) ? messages : [], {
+      maxTokens: options.maxTokens,
+    });
     if (result.ok && typeof result.text === "string") {
       learnSkipLog.clear();
       console.log(`[Learn] Local answer used ${result.retrieval} retrieval (${result.chunks.length} notes, model ${result.model}).`);
@@ -1866,9 +1870,11 @@ async function tryLearnedLocalAnswer(messages) {
   }
 }
 
-async function callLLM(messages, model) {
-  const local = await tryLearnedLocalAnswer(messages);
-  if (local.ok && typeof local.text === "string") return local.text;
+async function callLLM(messages, model, options = {}) {
+  if (options.useLocalNotes && !model) {
+    const local = await tryLearnedLocalAnswer(messages, { maxTokens: 4096 });
+    if (local.ok && typeof local.text === "string") return local.text;
+  }
   const m = model || LLM_MODEL;
   return await withRetry(async () => {
     const r = await fetch(`${LLM_BASE_URL}/chat/completions`, {
@@ -4341,7 +4347,7 @@ app.post("/api/agents/:name/invoke", async (req, res) => {
     const allDefs = getAllAgentDefinitions();
     if (!allDefs[agentName]) return res.status(404).json({ success: false, error: `Unknown agent: ${agentName}` });
 
-    const result = await invokeAgent(agentName, message, sessionId);
+    const result = await invokeAgent(agentName, message, sessionId, { useLocalNotes: true });
     res.json({ success: true, data: result });
   } catch (e) {
     console.error(`[Agent] ${req.params.name} error:`, e.message);
@@ -4425,7 +4431,7 @@ app.post("/api/chat", async (req, res) => {
       // Direct agent invocation via @mention
       const allDefs = getAllAgentDefinitions();
       try {
-        const agentResult = await invokeAgent(agentName, cleanMessage, sid);
+        const agentResult = await invokeAgent(agentName, cleanMessage, sid, { useLocalNotes: !model });
         reply = agentResult.text;
         respondingAgent = { name: allDefs[agentName].name, icon: allDefs[agentName].icon, id: agentName };
 
@@ -4436,7 +4442,7 @@ app.post("/api/chat", async (req, res) => {
             let delegationResults = [];
             for (const d of delegations) {
               try {
-                const dResult = await invokeAgent(d.agent, d.task, sid);
+                const dResult = await invokeAgent(d.agent, d.task, sid, { useLocalNotes: !model });
                 delegationResults.push(`**${allDefs[d.agent].name}** ${allDefs[d.agent].icon}: ${dResult.text}`);
               } catch (err) {
                 delegationResults.push(`**${allDefs[d.agent].name}**: Error — ${err.message}`);
@@ -4462,7 +4468,7 @@ app.post("/api/chat", async (req, res) => {
         // Route through Rex
         const allDefs = getAllAgentDefinitions();
         try {
-          const rexResult = await invokeAgent("rex", userContent, sid);
+          const rexResult = await invokeAgent("rex", userContent, sid, { useLocalNotes: !model });
           reply = rexResult.text;
           respondingAgent = { name: "Rex", icon: "🧠", id: "rex" };
 
@@ -4472,7 +4478,7 @@ app.post("/api/chat", async (req, res) => {
             let delegationResults = [];
             for (const d of delegations) {
               try {
-                const dResult = await invokeAgent(d.agent, d.task, sid);
+                const dResult = await invokeAgent(d.agent, d.task, sid, { useLocalNotes: !model });
                 delegationResults.push(`**${allDefs[d.agent].name}** ${allDefs[d.agent].icon}: ${dResult.text}`);
               } catch (err) {
                 delegationResults.push(`**${allDefs[d.agent].name}**: Error — ${err.message}`);
@@ -4493,7 +4499,7 @@ app.post("/api/chat", async (req, res) => {
         const systemWithMemory = SYSTEM_PROMPT + (memoryCtx ? `\n\n[MEMORY — What you know about this user and their projects]\n${memoryCtx}` : "");
 
         const msgs = [{ role: "system", content: systemWithMemory }, ...history.slice(-30), { role: "user", content: userContent }];
-        reply = await callLLM(msgs, model);
+        reply = await callLLM(msgs, model, { useLocalNotes: !model });
 
         // Handle retry failure from callLLM
         if (reply && typeof reply === "object" && reply.success === false) {
@@ -5243,7 +5249,12 @@ app.listen(PORT, () => {
   setTimeout(setupTelegramWebhook, 5000);
 
   // Initialize and start Discord bot
-  initDiscord({ invokeAgent: invokeAgent, getAllAgentDefinitions: getAllAgentDefinitions, logActivity: logActivity, getConnectionToken: getConnectionToken });
+  initDiscord({
+    invokeAgent: (agentName, userMessage, sessionId) => invokeAgent(agentName, userMessage, sessionId, { useLocalNotes: true }),
+    getAllAgentDefinitions: getAllAgentDefinitions,
+    logActivity: logActivity,
+    getConnectionToken: getConnectionToken,
+  });
   const discordToken = DISCORD_BOT_TOKEN || getConnectionToken("discord");
   if (discordToken) {
     setTimeout(() => {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { test } from "node:test";
@@ -137,6 +137,7 @@ test("keyword retrieval puts the matching note in the chat request", async () =>
   assert.match(sent[1].content, /knowledge\/lidar\.md/);
   assert.equal(sent[2].content, "Where are the lidar links?");
   assert.equal(calls[0].body.model, "qwen-local");
+  assert.equal(calls[0].body.max_tokens, 4096);
   assert.equal(calls[0].headers.Authorization, undefined);
   rmSync(dir, { recursive: true, force: true });
 });
@@ -279,6 +280,8 @@ test("the index reloads after chunks.json changes", async () => {
     version: 1,
     chunks: [chunk("zebra", "Zebras graze on the open plain.", "Zebra")],
   });
+  const later = new Date(Date.now() + 2000);
+  utimesSync(join(dir, "chunks.json"), later, later);
   const second = await index.answer([{ role: "user", content: "apple pie" }]);
   assert.equal(second.retrieval, "none");
   assert.doesNotMatch(seen[1], /apple pie cools/);
@@ -286,6 +289,34 @@ test("the index reloads after chunks.json changes", async () => {
   const third = await index.answer([{ role: "user", content: "where do zebras graze" }]);
   assert.equal(third.chunks[0].id, "zebra");
   assert.match(seen[2], /open plain/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("the caller token budget is sent to LM Studio", async () => {
+  const dir = tempIndex();
+  writeJson(dir, "chunks.json", { version: 1, chunks: [chunk("lidar", "Lidar notes stay local.", "Lidar")] });
+  let maxTokens = 0;
+  const index = new KnowledgeIndex({
+    dir,
+    model: "local-chat",
+    fetchImpl: async (_url, options) => {
+      maxTokens = JSON.parse(options.body).max_tokens;
+      return jsonResponse(200, { choices: [{ message: { content: "ok" } }] });
+    },
+  });
+  await index.answer([{ role: "user", content: "lidar" }], { maxTokens: 16384 });
+  assert.equal(maxTokens, 16384);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("an unchanged index is reused without reading the files again", () => {
+  const dir = tempIndex();
+  writeJson(dir, "chunks.json", { version: 1, chunks: [chunk("lidar", "Cached lidar note.", "Lidar")] });
+  const index = new KnowledgeIndex({ dir, model: "local-chat" });
+  const first = index.load();
+  const second = index.load();
+  assert.equal(second, first);
+  assert.equal(second.chunks[0].id, "lidar");
   rmSync(dir, { recursive: true, force: true });
 });
 
