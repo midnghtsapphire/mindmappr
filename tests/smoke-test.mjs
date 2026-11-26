@@ -82,6 +82,7 @@ function testRequiredFiles() {
     "skills-catalog.json",
     "rex-tools.mjs",
     "discord-connector.mjs",
+    "knowledge-index.mjs",
   ];
   let allExist = true;
   for (const f of requiredFiles) {
@@ -136,6 +137,7 @@ function testNodeModules() {
 function testSyntaxCheck() {
   try {
     execSync(`node --check ${join(ROOT, "server.mjs")}`, { timeout: 10000, stdio: "pipe" });
+    execSync(`node --check ${join(ROOT, "knowledge-index.mjs")}`, { timeout: 10000, stdio: "pipe" });
     pass("server.mjs syntax check");
   } catch (e) {
     fail("server.mjs syntax check", e.stderr?.toString()?.slice(0, 200) || e.message);
