@@ -1205,7 +1205,8 @@ async function callAgentLLM(agentName, messages, maxTokens = 16384, options = {}
   const model = agent.model;
   const startTime = Date.now();
 
-  if (options.useLocalNotes) {
+  const savedModelIsExplicit = !AGENT_DEFINITIONS[agentName];
+  if (options.useLocalNotes && !savedModelIsExplicit) {
     const local = await tryLearnedLocalAnswer(messages, { maxTokens });
     if (local.ok && typeof local.text === "string") {
       const elapsed = Date.now() - startTime;

@@ -2,6 +2,30 @@
 
 ---
 
+## Local notes and LM Studio (November 26, 2026)
+
+### Summary
+Question answers can use the local `mindmappr-brain` index and an LM Studio server. The index stays on the machine that builds it. The DigitalOcean app keeps answering through OpenRouter when that index or LM Studio is not there.
+
+### Behavior
+- Site chat without a named model, Telegram, Discord, and direct questions to built-in agents retrieve notes and call `LM_STUDIO_BASE_URL`.
+- Content studio, scheduled tasks, a named chat model, and custom agents with a saved model stay on OpenRouter.
+- Embeddings rank notes when `embeddings.json` is present and the embedding call works. Otherwise ranking is keyword overlap.
+- Notes are reference text on the local request. They are not sent to OpenRouter.
+- The index is re-read when file size or timestamps change.
+
+### Files
+- `knowledge-index.mjs` — load, rank, and LM Studio chat
+- `server.mjs` — opt-in local answers, plus parse repairs for a duplicate model declaration and an unclosed Threat prompt
+- `tests/knowledge-index.test.mjs`
+- `README.md`, `docs/prompts/system/local-notes-context.md`
+
+### Checks
+- `npm test` passed locally (knowledge-index tests and the smoke test).
+- No secrets added. `LM_STUDIO_API_KEY` is read from the environment only when set.
+
+---
+
 ## v8.5 — Web Search, Discord Management, Legal Agent, Stripe & Calendar (April 4, 2026)
 
 ### Summary

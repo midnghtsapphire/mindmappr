@@ -72,7 +72,9 @@ See `.env.example` for required variables.
 
 ## Local notes
 
-When MindMappr answers a question in site chat, Telegram @googlieeyes_bot, Discord, or a direct agent question, it reads the index built on the Windows laptop by `midnghtsapphire/mindmappr-brain` (`scripts/learn.ps1`) and sends the closest notes with the question to LM Studio. Content studio, scheduled tasks, and a chat request that names its own model stay on the existing OpenRouter path.
+When MindMappr answers a question in site chat, Telegram @googlieeyes_bot, Discord, or a direct question to a built-in agent, it reads the index built on the Windows laptop by `midnghtsapphire/mindmappr-brain` (`scripts/learn.ps1`) and sends the closest notes with the question to LM Studio. Content studio, scheduled tasks, a chat request that names its own model, and a custom agent with a saved model stay on the existing OpenRouter path.
+
+The DigitalOcean app at mind-mappr.com runs in its own container. That container does not have the laptop index or LM Studio. There, the same code finds no notes, cannot reach `localhost:1234`, and answers through OpenRouter. Notes are used when this server runs on the machine that holds the index and LM Studio.
 
 The default index folder is `%USERPROFILE%\mindmappr-brain\index` (`mindmappr-brain/index` under the home directory on other systems). `learn.ps1` writes `chunks.json` there, and `embeddings.json` when an embedding model is loaded. Those files stay on the laptop. This repo does not commit them.
 

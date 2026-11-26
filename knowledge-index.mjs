@@ -232,6 +232,7 @@ export class KnowledgeIndex {
       chunkStat = safeStat(chunksPath);
       embedStat = safeStat(embedPath);
     } catch (err) {
+      console.warn(`[Learn] Index directory was not used: ${err.message}`);
       return emptyIndex("invalid");
     }
     const sig = `${fileSignature(chunkStat)}|${fileSignature(embedStat)}`;
@@ -246,7 +247,8 @@ export class KnowledgeIndex {
     let parsedChunks;
     try {
       parsedChunks = parseJsonFile(chunksPath);
-    } catch {
+    } catch (err) {
+      console.warn(`[Learn] chunks.json was not used: ${err.message}`);
       return emptyIndex("invalid");
     }
     const chunks = normalizeChunks(parsedChunks);
@@ -259,7 +261,8 @@ export class KnowledgeIndex {
           embeddingModel = parsed.model;
           vectorsById = parsed.vectorsById;
         }
-      } catch {
+      } catch (err) {
+        console.warn(`[Learn] embeddings.json was not used: ${err.message}`);
         embeddingModel = "";
         vectorsById = new Map();
       }
@@ -271,7 +274,8 @@ export class KnowledgeIndex {
     let loaded;
     try {
       loaded = this.load();
-    } catch {
+    } catch (err) {
+      console.warn(`[Learn] Index was not loaded: ${err.message}`);
       loaded = emptyIndex("invalid");
     }
     const query = latestUserText(messages);
@@ -321,7 +325,8 @@ export class KnowledgeIndex {
       const data = await response.json();
       const vector = data?.data?.[0]?.embedding;
       return Array.isArray(vector) ? vector.map(Number) : null;
-    } catch {
+    } catch (err) {
+      console.warn(`[Learn] Query embedding failed: ${err.message}`);
       return null;
     }
   }
