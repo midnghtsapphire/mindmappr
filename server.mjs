@@ -24,7 +24,8 @@ const PORT = parseInt(process.env.PORT || "3005");
 const LLM_API_KEY = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY || "";
 const LLM_BASE_URL = "https://openrouter.ai/api/v1";
 const LLM_MODEL = process.env.LLM_MODEL || "anthropic/claude-sonnet-4-6";
-const LLM_MODEL = process.env.LLM_MODEL || "anthropic/claude-sonnet-4";
+// 2026-11-26: retired duplicate declaration from a merge. The line above is the live model.
+// const LLM_MODEL = process.env.LLM_MODEL || "anthropic/claude-sonnet-4";
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || "";
@@ -1066,6 +1067,8 @@ RULES:
 6. Coordinate with Forensic agent for active incidents
 
 Owner: Audrey Evans. Security posture is a priority — be thorough and decisive.
+Current date: ${new Date().toISOString().split('T')[0]}`,
+  },
   telegram: {
     name: "MindMappr Bot",
     model: "anthropic/claude-sonnet-4",
@@ -1190,8 +1193,9 @@ function getGeneratorCallsThisHour() {
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Agent LLM call (routes through OpenRouter using LLM_API_KEY) ────────────
 // ══════════════════════════════════════════════════════════════════════════════
-async function callAgentLLM(agentName, messages, maxTokens = 4096) {
-  const agent = AGENT_DEFINITIONS[agentName];
+// 2026-11-26: retired duplicate function header from a merge. The live function follows.
+// async function callAgentLLM(agentName, messages, maxTokens = 4096) {
+//   const agent = AGENT_DEFINITIONS[agentName];
 async function callAgentLLM(agentName, messages, maxTokens = 16384) {
   const allDefs = getAllAgentDefinitions();
   const agent = allDefs[agentName];
@@ -1840,7 +1844,8 @@ async function callLLM(messages, model) {
         "X-Title": "MindMappr"
       },
       body: JSON.stringify({ model: m, messages, max_tokens: 4096, temperature: 0.7 })
-      body: JSON.stringify({ model: m, messages, max_tokens: 16384, temperature: 0.7 })
+      // 2026-11-26: retired duplicate body from a merge. The line above is the live request.
+      // body: JSON.stringify({ model: m, messages, max_tokens: 16384, temperature: 0.7 })
     });
     if (!r.ok) { const t = await r.text(); throw new Error(`LLM ${r.status}: ${t.slice(0, 200)}`); }
     const d = await r.json();
