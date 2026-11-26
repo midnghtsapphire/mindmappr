@@ -69,3 +69,29 @@ node server.mjs
 ## Environment Variables
 
 See `.env.example` for required variables.
+
+## Local notes
+
+When MindMappr answers a question (the site chat, Telegram @googlieeyes_bot, or Discord), it reads the index built on the Windows laptop by `midnghtsapphire/mindmappr-brain` (`scripts/learn.ps1`) and sends the closest notes with the question to LM Studio.
+
+The default index folder is `%USERPROFILE%\mindmappr-brain\index` (`mindmappr-brain/index` under the home directory on other systems). `learn.ps1` writes `chunks.json` there, and `embeddings.json` when an embedding model is loaded. Those files stay on the laptop. This repo does not commit them.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `LM_STUDIO_BASE_URL` | `http://localhost:1234/v1` | OpenAI-compatible LM Studio server |
+| `LM_STUDIO_MODEL` | first loaded chat model | Model id sent to `/chat/completions` |
+| `MINDMAPPR_INDEX_DIR` | home `mindmappr-brain/index` | Folder that holds `chunks.json` and `embeddings.json` |
+| `MINDMAPPR_INDEX_TOP_K` | `5` | How many notes to attach (maximum 20) |
+| `LM_STUDIO_API_KEY` | empty | Sent as a bearer token only when set. LM Studio does not require one. |
+| `LM_STUDIO_TIMEOUT_MS` | `20000` | How long to wait on LM Studio before using the existing OpenRouter path |
+
+- If `embeddings.json` is present and LM Studio can embed the question, notes are ranked by cosine similarity.
+- Otherwise notes are ranked by keyword overlap with the question.
+- Matching notes are added as a system message on the chat request. The prompt text is in `docs/prompts/system/local-notes-context.md`.
+- A missing, empty, or unreadable index still sends the question to LM Studio, without notes.
+- If LM Studio is not running or returns an error, the answer uses the existing OpenRouter path (`LLM_API_KEY`, `LLM_MODEL`), including a model chosen in the chat request. Notes stay on the local request. They are not sent to OpenRouter.
+- `chunks.json` and `embeddings.json` are read again when their contents change.
+
+```bash
+node --test tests/knowledge-index.test.mjs
+```

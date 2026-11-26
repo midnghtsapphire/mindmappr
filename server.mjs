@@ -15,6 +15,7 @@ import { initRexTools, executeTool as executeRexTool, parseToolCalls, getToolLis
 import { initDiscord, startDiscordBot, sendDiscordNotification, getDiscordStatus, disconnectDiscord, getDiscordClient } from "./discord-connector.mjs";
 import { ChannelType } from "discord.js";
 import { restoreFromGitHub, markDirty, markDbDirty, syncToGitHub, fullSync, startSyncTimer, stopSyncTimer, getSyncStatus } from "./github-sync.mjs";
+import { KnowledgeIndex } from "./knowledge-index.mjs";
 
 const execAsync = promisify(exec);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -1204,6 +1205,16 @@ async function callAgentLLM(agentName, messages, maxTokens = 16384) {
   const model = agent.model;
   const startTime = Date.now();
 
+  const local = await tryLearnedLocalAnswer(messages);
+  if (local.ok && typeof local.text === "string") {
+    const elapsed = Date.now() - startTime;
+    if (agentState[agentName]) {
+      agentState[agentName].lastActivity = new Date().toISOString();
+      agentState[agentName].taskCount++;
+    }
+    return { text: local.text, usage: {}, elapsed, model: local.model || "lm-studio" };
+  }
+
   const response = await fetch(`${LLM_BASE_URL}/chat/completions`, {
     method: "POST",
     headers: {
@@ -1832,7 +1843,32 @@ Owner: Audrey Evans, AuDHD, 60, cancer survivor. Daughter is legally deaf. Be wa
 // ══════════════════════════════════════════════════════════════════════════════
 // ── LLM call (v5 — with retry) ─────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
+const knowledgeIndex = new KnowledgeIndex();
+const learnSkipLog = new Set();
+
+async function tryLearnedLocalAnswer(messages) {
+  try {
+    const result = await knowledgeIndex.answer(Array.isArray(messages) ? messages : []);
+    if (result.ok && typeof result.text === "string") {
+      learnSkipLog.clear();
+      console.log(`[Learn] Local answer used ${result.retrieval} retrieval (${result.chunks.length} notes, model ${result.model}).`);
+      return result;
+    }
+    const reason = result.reason || "lm-studio-unavailable";
+    if (!learnSkipLog.has(reason)) {
+      learnSkipLog.add(reason);
+      console.warn(`[Learn] Local model not used (${reason}). Index status: ${result.indexStatus || "unknown"}.`);
+    }
+    return result;
+  } catch (err) {
+    console.warn(`[Learn] Local answer failed: ${err.message}`);
+    return { ok: false, reason: "lm-studio-unavailable" };
+  }
+}
+
 async function callLLM(messages, model) {
+  const local = await tryLearnedLocalAnswer(messages);
+  if (local.ok && typeof local.text === "string") return local.text;
   const m = model || LLM_MODEL;
   return await withRetry(async () => {
     const r = await fetch(`${LLM_BASE_URL}/chat/completions`, {
