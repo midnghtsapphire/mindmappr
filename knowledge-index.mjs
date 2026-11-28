@@ -21,12 +21,244 @@ const STOP_WORDS = new Set([
 
 const EMBEDDING_MODEL_PATTERN = /embed|nomic|e5|bge|gte|minilm/i;
 const TOOL_CAPABLE_PATTERN = /qwen|hermes|functionary|firefunction|tool-use|tool_use/i;
+const DEFAULT_CONTEXT_LENGTH = 8192;
+const PROMPT_RATIO = 0.75;
+const RETRY_PROMPT_RATIO = 0.45;
+const NOTES_MARK = "Notes from the local MindMappr knowledge index.";
 
-export function pickChatModel(ids) {
-  const list = Array.isArray(ids) ? ids.filter((id) => typeof id === "string" && id.length > 0) : [];
-  const chat = list.filter((id) => !EMBEDDING_MODEL_PATTERN.test(id));
-  const capable = chat.find((id) => TOOL_CAPABLE_PATTERN.test(id));
-  return capable || chat[0] || list[0] || "";
+export function isToolCapableModel(id) {
+  return TOOL_CAPABLE_PATTERN.test(String(id || ""));
+}
+
+export function isTooLargeModel(id) {
+  const text = String(id || "");
+  const pattern = /(?:^|[^a-z0-9])(\d+(?:\.\d+)?)b(?:[^a-z0-9]|$)/gi;
+  let match;
+  while ((match = pattern.exec(text))) {
+    const size = Number(match[1]);
+    if (Number.isFinite(size) && size >= 20) return true;
+  }
+  return false;
+}
+
+function contextOf(entry) {
+  if (!entry) return 0;
+  const value = Number(entry.loaded_context_length || entry.max_context_length || 0);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function normalizeEntries(models) {
+  const list = Array.isArray(models) ? models : [];
+  const entries = [];
+  for (const item of list) {
+    if (typeof item === "string") {
+      if (item) entries.push({ id: item });
+      continue;
+    }
+    if (item && typeof item.id === "string" && item.id) {
+      entries.push({
+        id: item.id,
+        state: typeof item.state === "string" ? item.state : undefined,
+        loaded_context_length: Number(item.loaded_context_length) || 0,
+        max_context_length: Number(item.max_context_length) || 0,
+      });
+    }
+  }
+  return entries;
+}
+
+export function inspectModels(models) {
+  const entries = normalizeEntries(models);
+  const hasState = entries.some((entry) => typeof entry.state === "string");
+  const pool = hasState ? entries.filter((entry) => entry.state === "loaded") : entries;
+  const chat = pool.filter((entry) => entry.id && !EMBEDDING_MODEL_PATTERN.test(entry.id) && !isTooLargeModel(entry.id));
+  const capable = chat.find((entry) => isToolCapableModel(entry.id));
+  const chosen = capable || chat[0] || null;
+  if (chosen) return { id: chosen.id, contextLength: contextOf(chosen) };
+  if (!hasState) {
+    const fallback = entries.find((entry) => entry.id);
+    return { id: fallback ? fallback.id : "", contextLength: contextOf(fallback) };
+  }
+  return { id: "", contextLength: 0 };
+}
+
+export function pickChatModel(models) {
+  return inspectModels(models).id;
+}
+
+export function messageText(message) {
+  if (!message) return "";
+  if (typeof message.content === "string") return message.content;
+  if (Array.isArray(message.content)) {
+    return message.content.map((part) => {
+      if (typeof part === "string") return part;
+      if (part && typeof part.text === "string") return part.text;
+      return "";
+    }).join("\n");
+  }
+  return "";
+}
+
+export function estimateTokens(text) {
+  const length = String(text || "").length;
+  if (!length) return 0;
+  return Math.ceil(length / 3);
+}
+
+export function estimateMessages(messages) {
+  let total = 0;
+  for (const message of messages || []) {
+    total += 4;
+    total += estimateTokens(messageText(message));
+    if (Array.isArray(message.tool_calls)) total += estimateTokens(JSON.stringify(message.tool_calls));
+  }
+  return total;
+}
+
+function toolCallText(message) {
+  const calls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+  const lines = calls.map((call) => {
+    const name = call?.function?.name || call?.name || "tool";
+    const raw = call?.function?.arguments ?? call?.arguments ?? "";
+    const rendered = typeof raw === "string" ? raw : JSON.stringify(raw);
+    return `TOOL:${name}:${rendered}`;
+  });
+  return [messageText(message).trim(), ...lines].filter(Boolean).join("\n");
+}
+
+function mergeSameRole(turns) {
+  const merged = [];
+  for (const turn of turns) {
+    const prev = merged[merged.length - 1];
+    const canMerge = prev && prev.role === turn.role && prev.role !== "tool" && !prev.tool_calls && !turn.tool_calls;
+    if (canMerge) {
+      prev.content = [prev.content, turn.content].filter(Boolean).join("\n\n");
+    } else {
+      merged.push({ ...turn });
+    }
+  }
+  return merged;
+}
+
+export function normalizeForTemplate(messages, options = {}) {
+  const textTools = options.textTools === true;
+  const systems = [];
+  const turns = [];
+  for (const message of Array.isArray(messages) ? messages : []) {
+    if (!message || typeof message !== "object") continue;
+    if (message.role === "system") {
+      const text = messageText(message).trim();
+      if (text) systems.push(text);
+      continue;
+    }
+    if (textTools && message.role === "assistant" && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+      const text = toolCallText(message);
+      if (text) turns.push({ role: "assistant", content: text });
+      continue;
+    }
+    if (textTools && message.role === "tool") {
+      const text = messageText(message).trim();
+      if (text) turns.push({ role: "user", content: `Tool results:\n${text}` });
+      continue;
+    }
+    if (message.role === "tool") {
+      turns.push({ role: "tool", tool_call_id: message.tool_call_id, content: messageText(message) });
+      continue;
+    }
+    if (message.role !== "user" && message.role !== "assistant") continue;
+    const next = { role: message.role, content: messageText(message) };
+    if (!textTools && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+      next.tool_calls = message.tool_calls;
+      if (!next.content) next.content = null;
+    }
+    if (next.content || next.tool_calls) turns.push(next);
+  }
+  let merged = mergeSameRole(turns);
+  if (textTools && merged.length > 0 && merged[0].role === "assistant") {
+    merged = [{ role: "user", content: "Continue." }, ...merged];
+    merged = mergeSameRole(merged);
+  }
+  const out = [];
+  const system = systems.join("\n\n").trim();
+  if (system) out.push({ role: "system", content: system });
+  for (const turn of merged) out.push(turn);
+  return out;
+}
+
+function lastUserIndex(messages) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i] && messages[i].role === "user") return i;
+  }
+  return messages.length - 1;
+}
+
+function shrinkNotes(content) {
+  const text = String(content || "");
+  const at = text.indexOf(NOTES_MARK);
+  if (at < 0) return text;
+  const head = text.slice(0, at + NOTES_MARK.length);
+  const body = text.slice(head.length);
+  if (body.length < 80) return text;
+  return `${head}${body.slice(0, Math.floor(body.length / 2))}\n...[trimmed]`;
+}
+
+function trimOnce(messages, textTools) {
+  const start = messages[0]?.role === "system" ? 1 : 0;
+  const keep = lastUserIndex(messages);
+  if (messages.length - start > 1) {
+    let drop = -1;
+    for (let i = start; i < messages.length; i++) {
+      if (i !== keep) { drop = i; break; }
+    }
+    if (drop >= 0) {
+      const copy = messages.filter((_, index) => index !== drop);
+      const normalized = normalizeForTemplate(copy, { textTools });
+      if (estimateMessages(normalized) < estimateMessages(messages)) return normalized;
+    }
+  }
+  if (messages[0]?.role === "system") {
+    const shrunk = shrinkNotes(messages[0].content);
+    if (shrunk.length < String(messages[0].content || "").length) {
+      return messages.map((message, index) => index === 0 ? { ...message, content: shrunk } : message);
+    }
+  }
+  let longest = -1;
+  let size = 0;
+  messages.forEach((message, index) => {
+    const length = messageText(message).length;
+    const floor = index === keep ? 400 : 200;
+    if (length > floor && length > size) {
+      size = length;
+      longest = index;
+    }
+  });
+  if (longest >= 0) {
+    const text = messageText(messages[longest]);
+    const floor = longest === keep ? 400 : 120;
+    const nextLen = Math.max(floor, Math.floor(text.length / 2));
+    if (nextLen < text.length) {
+      return messages.map((message, index) => index === longest
+        ? { ...message, content: `${text.slice(0, nextLen)}\n...[trimmed]`, tool_calls: undefined }
+        : message);
+    }
+  }
+  return null;
+}
+
+export function fitContext(messages, options = {}) {
+  const contextLength = Number(options.contextLength) > 0 ? Number(options.contextLength) : DEFAULT_CONTEXT_LENGTH;
+  const ratio = Number(options.ratio) > 0 ? Number(options.ratio) : PROMPT_RATIO;
+  const budget = Math.max(128, Math.floor(contextLength * ratio));
+  const textTools = options.textTools === true;
+  let current = normalizeForTemplate(messages, { textTools });
+  let guard = 0;
+  while (estimateMessages(current) > budget && guard < 40) {
+    guard += 1;
+    const next = trimOnce(current, textTools);
+    if (!next) break;
+    current = next;
+  }
+  return current;
 }
 
 export function defaultIndexDir() {
@@ -347,22 +579,89 @@ export class KnowledgeIndex {
     }
   }
 
+  nativeModelsUrl() {
+    const root = this.baseUrl.replace(/\/v1\/?$/, "");
+    return `${root}/api/v0/models`;
+  }
+
+  async readModelList(url) {
+    const response = await this.fetchImpl(url, {
+      method: "GET",
+      headers: this.headers(),
+      signal: AbortSignal.timeout(this.lookupTimeoutMs),
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return Array.isArray(data?.data) ? data.data : null;
+  }
+
   async pickModel() {
     try {
-      const response = await this.fetchImpl(`${this.baseUrl}/models`, {
-        method: "GET",
-        headers: this.headers(),
-        signal: AbortSignal.timeout(this.lookupTimeoutMs),
-      });
-      if (!response.ok) return "";
-      const data = await response.json();
-      const ids = Array.isArray(data?.data)
-        ? data.data.map((item) => item && item.id).filter((id) => typeof id === "string" && id.length > 0)
-        : [];
-      return pickChatModel(ids);
+      let listed = null;
+      try {
+        listed = await this.readModelList(this.nativeModelsUrl());
+      } catch {
+        listed = null;
+      }
+      const nativeHasState = Array.isArray(listed) && listed.some((item) => item && typeof item.state === "string");
+      if (!nativeHasState) {
+        try {
+          listed = await this.readModelList(`${this.baseUrl}/models`);
+        } catch {
+          listed = null;
+        }
+      }
+      const chosen = inspectModels(listed || []);
+      if (chosen.contextLength) this.contextLength = chosen.contextLength;
+      return chosen.id;
     } catch {
       return "";
     }
+  }
+
+  async postLocal(model, messages, options = {}) {
+    const contextLength = this.contextLength || DEFAULT_CONTEXT_LENGTH;
+    const maxTokens = normalizeMaxTokens(options.maxTokens);
+    const capable = isToolCapableModel(model);
+    let textTools = !capable || options.nativeTools === false;
+    let ratio = PROMPT_RATIO;
+    let lastStatus = 0;
+    let lastBody = "";
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const prepared = fitContext(messages, { contextLength, ratio, textTools });
+      const body = {
+        model,
+        messages: prepared,
+        temperature: 0.7,
+        max_tokens: maxTokens,
+      };
+      if (!textTools && options.nativeTools !== false && Array.isArray(options.tools) && options.tools.length > 0) {
+        body.tools = options.tools;
+      }
+      const response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(this.chatTimeoutMs),
+      });
+      if (response.ok) return response.json();
+      try { lastBody = await response.text(); } catch { lastBody = ""; }
+      lastStatus = response.status;
+      const jinja = /jinja|must alternate|unable to generate parser/i.test(lastBody);
+      const tooBig = /exceeds the available context size/i.test(lastBody);
+      if (attempt === 0 && (jinja || tooBig)) {
+        if (jinja) textTools = true;
+        if (tooBig) ratio = RETRY_PROMPT_RATIO;
+        console.warn(`[Learn] LM Studio rejected the prompt (${jinja ? "template" : "context"}). Retrying once with a shorter alternating request.`);
+        continue;
+      }
+      break;
+    }
+    const err = new Error(`lm-studio-http-${lastStatus}`);
+    err.status = lastStatus;
+    err.body = String(lastBody || "").slice(0, 500);
+    err.reason = `lm-studio-http-${lastStatus}`;
+    throw err;
   }
 
   async chat(messages, options = {}) {
@@ -377,27 +676,20 @@ export class KnowledgeIndex {
       if (tools.length > 0 && typeof options.executeTool === "function") {
         return await this.chatWithTools(messages, options, model, tools, maxTokens, started);
       }
-      const response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: this.headers(),
-        body: JSON.stringify({ model, messages, temperature: 0.7, max_tokens: maxTokens }),
-        signal: AbortSignal.timeout(this.chatTimeoutMs),
-      });
-      if (!response.ok) {
-        return { ok: false, reason: `lm-studio-http-${response.status}`, model, elapsed: Date.now() - started };
-      }
-      const data = await response.json();
+      const data = await this.postLocal(model, messages, { maxTokens });
       const text = data?.choices?.[0]?.message?.content;
       if (typeof text !== "string" || !text.trim()) {
         return { ok: false, reason: "lm-studio-empty", model, elapsed: Date.now() - started };
       }
       return { ok: true, text, model, elapsed: Date.now() - started };
-    } catch {
+    } catch (err) {
+      if (err && err.reason) return { ok: false, reason: err.reason, model: this.model || undefined, elapsed: Date.now() - started };
       return { ok: false, reason: "lm-studio-unavailable", elapsed: Date.now() - started };
     }
   }
 
   async chatWithTools(messages, options, model, tools, maxTokens, started) {
+    const capable = isToolCapableModel(model);
     try {
       const loop = await runAgentLoop({
         messages,
@@ -407,23 +699,13 @@ export class KnowledgeIndex {
         timeoutMs: this.chatTimeoutMs,
         confirmRequired: options.confirmRequired,
         userConfirmed: options.userConfirmed,
+        nativeTools: capable,
         chat: async (outbound, requestTools, meta) => {
-          const body = { model, messages: outbound, temperature: 0.7, max_tokens: maxTokens };
-          if (meta.nativeTools && requestTools.length > 0) body.tools = requestTools;
-          const response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
-            method: "POST",
-            headers: this.headers(),
-            body: JSON.stringify(body),
-            signal: AbortSignal.timeout(this.chatTimeoutMs),
+          const data = await this.postLocal(model, outbound, {
+            maxTokens,
+            tools: requestTools,
+            nativeTools: capable && meta.nativeTools !== false,
           });
-          if (!response.ok) {
-            const err = new Error(`lm-studio-http-${response.status}`);
-            err.status = response.status;
-            err.reason = `lm-studio-http-${response.status}`;
-            try { err.body = await response.text(); } catch { err.body = ""; }
-            throw err;
-          }
-          const data = await response.json();
           const message = data?.choices?.[0]?.message;
           if (!message || (typeof message.content !== "string" && !Array.isArray(message.tool_calls))) {
             const err = new Error("lm-studio-empty");
