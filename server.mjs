@@ -11,11 +11,12 @@ import cron from "node-cron";
 import PDFDocument from "pdfkit";
 import ExcelJS from "exceljs";
 import nodemailer from "nodemailer";
-import { initRexTools, executeTool as executeRexTool, parseToolCalls, getToolListForPrompt, TOOL_REGISTRY, EXTRA_TOOLS } from "./rex-tools.mjs";
+import { initRexTools, executeTool as executeRexTool, getToolListForPrompt, TOOL_REGISTRY, EXTRA_TOOLS } from "./rex-tools.mjs";
 import { initDiscord, startDiscordBot, sendDiscordNotification, getDiscordStatus, disconnectDiscord, getDiscordClient } from "./discord-connector.mjs";
 import { ChannelType } from "discord.js";
 import { restoreFromGitHub, markDirty, markDbDirty, syncToGitHub, fullSync, startSyncTimer, stopSyncTimer, getSyncStatus } from "./github-sync.mjs";
 import { KnowledgeIndex } from "./knowledge-index.mjs";
+import { runAgentLoop, registryToTools } from "./agent-loop.mjs";
 
 const execAsync = promisify(exec);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -740,7 +741,7 @@ TOOL:do_list_droplets
 TOOL:llm_code_review:function add(a,b){return a+b}
 TOOL:github_create_repo:my-new-project:A cool project:false
 
-You can call MULTIPLE tools in one response (one per line). After tools execute, you'll get results and can summarize for the user.
+You can call MULTIPLE tools in one response (one per line). Each result comes back to you so you can call the next tool or answer the user. Do not invent tool results.
 
 ${getToolListForPrompt()}
 
@@ -1191,6 +1192,116 @@ function getGeneratorCallsThisHour() {
   return generatorCallTimestamps.length;
 }
 
+function coerceArg(value) {
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return value;
+}
+
+function toolSchemas() {
+  return registryToTools({ ...EXTRA_TOOLS, ...TOOL_REGISTRY });
+}
+
+function bindToolArgs(name, positional) {
+  const info = TOOL_REGISTRY[name] || EXTRA_TOOLS[name];
+  const declared = (info?.params || []).map((param) => String(param).replace(/\?$/, ""));
+  const params = {};
+  positional.forEach((value, index) => {
+    params[declared[index] || `arg${index + 1}`] = coerceArg(value);
+  });
+  return params;
+}
+
+async function executeRegisteredTool(name, params = {}) {
+  const args = { ...params };
+  delete args.confirm;
+  if (EXTRA_TOOLS[name]) return executeTool(name, args);
+  const tool = TOOL_REGISTRY[name];
+  if (!tool) return { success: false, error: `Unknown tool: ${name}` };
+  const declared = (tool.params || []).map((param) => String(param).replace(/\?$/, ""));
+  const positional = declared.map((key) => args[key]);
+  while (positional.length > 0 && positional[positional.length - 1] === undefined) positional.pop();
+  return executeRexTool(name, positional.map((value) => (value === undefined ? undefined : coerceArg(value))));
+}
+
+function agentLoopLimits() {
+  const steps = Number(process.env.AGENT_LOOP_MAX_STEPS);
+  const timeoutMs = Number(process.env.AGENT_LOOP_TIMEOUT_MS);
+  return {
+    maxSteps: Number.isFinite(steps) ? steps : undefined,
+    timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : undefined,
+  };
+}
+
+function publicTrace(trace) {
+  return (trace || []).map((entry) => {
+    const item = {
+      tool: entry.tool,
+      ok: !(entry.result && entry.result.success === false),
+    };
+    if (entry.result && entry.result.missing) item.missing = entry.result.missing;
+    if (entry.result && entry.result.hint) item.hint = entry.result.hint;
+    if (entry.result && entry.result.confirmRequired) item.confirmRequired = true;
+    if (entry.result && entry.result.file) item.file = entry.result.file;
+    return item;
+  });
+}
+
+async function postChatCompletion({ url, headers, model, messages, tools, nativeTools, maxTokens }) {
+  const body = { model, messages, max_tokens: maxTokens, temperature: 0.7 };
+  if (nativeTools && tools && tools.length > 0) body.tools = tools;
+  let lastErr;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+    if (response.ok) {
+      const data = await response.json();
+      return { message: data.choices?.[0]?.message || { content: "" }, usage: data.usage || {} };
+    }
+    const text = await response.text();
+    const err = new Error(`LLM ${response.status}: ${text.slice(0, 200)}`);
+    err.status = response.status;
+    err.body = text.slice(0, 500);
+    if (response.status !== 429 && response.status < 500) throw err;
+    lastErr = err;
+    await new Promise((resolve) => setTimeout(resolve, 1500 * Math.pow(2, attempt - 1)));
+  }
+  throw lastErr;
+}
+
+async function completeWithTools(messages, { model, maxTokens, referer, title }) {
+  const limits = agentLoopLimits();
+  try {
+    return await runAgentLoop({
+      messages,
+      tools: toolSchemas(),
+      executeTool: (name, args) => executeRegisteredTool(name, args),
+      bindArgs: bindToolArgs,
+      maxSteps: limits.maxSteps,
+      timeoutMs: limits.timeoutMs,
+      chat: (outbound, tools, meta) => postChatCompletion({
+        url: `${LLM_BASE_URL}/chat/completions`,
+        headers: {
+          "Authorization": `Bearer ${LLM_API_KEY}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": referer,
+          "X-Title": title,
+        },
+        model,
+        messages: outbound,
+        tools,
+        nativeTools: meta.nativeTools,
+        maxTokens,
+      }),
+    });
+  } catch (err) {
+    return { success: false, error: friendlyError(err, "AI model"), text: "", trace: [], steps: 0, stopReason: "error", usage: {} };
+  }
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Agent LLM call (routes through OpenRouter using LLM_API_KEY) ────────────
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1214,41 +1325,29 @@ async function callAgentLLM(agentName, messages, maxTokens = 16384, options = {}
         agentState[agentName].lastActivity = new Date().toISOString();
         agentState[agentName].taskCount++;
       }
-      return { text: local.text, usage: {}, elapsed, model };
+      return { text: local.text, usage: {}, elapsed, model, trace: local.trace || [] };
     }
   }
 
-  const response = await fetch(`${LLM_BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${LLM_API_KEY}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "https://mind-mappr.com",
-      "X-Title": `MindMappr-${agent.name}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      max_tokens: maxTokens,
-      temperature: 0.7,
-    }),
+  const result = await completeWithTools(messages, {
+    model,
+    maxTokens,
+    referer: "https://mind-mappr.com",
+    title: `MindMappr-${agent.name}`,
   });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`${agent.name} LLM error (${response.status}): ${errText.slice(0, 200)}`);
-  }
-
-  const data = await response.json();
   const elapsed = Date.now() - startTime;
-  const text = data.choices?.[0]?.message?.content || "No response.";
-  const usage = data.usage || {};
+  if (result.success === false) throw new Error(result.error || `${agent.name} LLM error`);
 
-  // Update agent state
   agentState[agentName].lastActivity = new Date().toISOString();
   agentState[agentName].taskCount++;
 
-  return { text, usage, elapsed, model };
+  return {
+    text: result.text || "No response.",
+    usage: result.usage || {},
+    elapsed,
+    model,
+    trace: result.trace || [],
+  };
 }
 
 /**
@@ -1301,104 +1400,19 @@ async function invokeAgent(agentName, userMessage, sessionId = null, options = {
 
     const result = await callAgentLLM(agentName, messages, 16384, options);
     let finalText = result.text;
+    const trace = result.trace || [];
     let totalInputTokens = result.usage.prompt_tokens || 0;
     let totalOutputTokens = result.usage.completion_tokens || 0;
     let totalElapsed = result.elapsed;
 
-     // ── Universal Tool-Use Loop (all agents can use tools) ───────────────
-    // First check for TOOL: format (Rex-style tools from rex-tools.mjs)
-    const toolCalls = parseToolCalls(finalText);
-    if (toolCalls.length > 0) {
-      logActivity(agentName, agent.name, "tool_use", `Executing ${toolCalls.length} tool(s): ${toolCalls.map(t => t.tool).join(", ")}`);
-      const toolResults = [];
-      for (const tc of toolCalls) {
-        try {
-          // Try rex-tools.mjs TOOL_REGISTRY first, then server.mjs executeTool for EXTRA_TOOLS
-          let toolResult;
-          if (TOOL_REGISTRY[tc.tool]) {
-            toolResult = await executeRexTool(tc.tool, tc.args);
-          } else if (EXTRA_TOOLS[tc.tool]) {
-            // Parse params: try JSON first, then map positional args to declared param names
-            let params = {};
-            const joinedArgs = tc.args.join(":");
-            if (tc.args.length === 1 && tc.args[0].startsWith("{")) {
-              try { params = JSON.parse(tc.args[0]); } catch { params = { input: tc.args[0] }; }
-            } else if (joinedArgs.startsWith("{")) {
-              try { params = JSON.parse(joinedArgs); } catch { params = { input: joinedArgs }; }
-            } else if (tc.args.length > 0) {
-              // Map positional args to the tool's declared param names
-              const declaredParams = EXTRA_TOOLS[tc.tool].params || [];
-              for (let i = 0; i < tc.args.length && i < declaredParams.length; i++) {
-                const val = tc.args[i];
-                // Auto-convert 'true'/'false' to booleans
-                params[declaredParams[i]] = val === "true" ? true : val === "false" ? false : val;
-              }
-              if (Object.keys(params).length === 0) params = { input: tc.args.join(" ") };
-            }
-            toolResult = await executeTool(tc.tool, params);
-          } else {
-            throw new Error(`Unknown tool: ${tc.tool}`);
-          }
-          toolResults.push({ tool: tc.tool, success: true, result: typeof toolResult === "string" ? toolResult : JSON.stringify(toolResult) });
-          logActivity(agentName, agent.name, "tool_result", `${tc.tool}: success`);
-        } catch (toolErr) {
-          toolResults.push({ tool: tc.tool, success: false, error: toolErr.message });
-          logActivity(agentName, agent.name, "tool_error", `${tc.tool}: ${toolErr.message.slice(0, 100)}`);
-        }
-      }
-      // DIRECT tool output — NO LLM rewriting to prevent hallucination
-      const toolResultsSummary = toolResults.map(tr => {
-        if (tr.success) {
-          // Parse the JSON result to extract key fields for readable output
-          try {
-            const parsed = JSON.parse(tr.result);
-            const lines = [`**Tool: ${tr.tool}** — ✅ Success`];
-            for (const [k, v] of Object.entries(parsed)) {
-              if (k === 'success') continue;
-              if (Array.isArray(v)) {
-                lines.push(`• ${k}: ${v.length} items`);
-                v.slice(0, 10).forEach(item => {
-                  if (typeof item === 'object') lines.push(`  - ${JSON.stringify(item)}`);
-                  else lines.push(`  - ${item}`);
-                });
-                if (v.length > 10) lines.push(`  ... and ${v.length - 10} more`);
-              } else if (typeof v === 'object' && v !== null) {
-                lines.push(`• ${k}: ${JSON.stringify(v)}`);
-              } else {
-                lines.push(`• ${k}: ${v}`);
-              }
-            }
-            return lines.join('\n');
-          } catch {
-            return `**Tool: ${tr.tool}** — ✅ ${tr.result}`;
-          }
-        } else {
-          return `**Tool: ${tr.tool}** — ❌ FAILED: ${tr.error}`;
-        }
-      }).join('\n\n');
-      // Append raw tool output directly — no LLM rewriting
-      finalText = `Here are the actual results:\n\n${toolResultsSummary}`;
-    }
-    // Also check for <tool_call> format (v5 style) for all agents
-    if (!toolCalls.length) {
-      const tc = parseToolCall(finalText);
-      if (tc) {
-        logActivity(agentName, agent.name, "tool_use", `Executing tool: ${tc.tool}`);
-        try {
-          const result = await executeTool(tc.tool, tc.params || {});
-          if (result.success) {
-            const resultSummary = result.file ? `File created: ${result.file}. ${result.message || ""}` : (result.output || JSON.stringify(result));
-            // DIRECT output — no LLM rewriting
-            finalText = `**Tool: ${tc.tool}** — ✅ Result:\n${resultSummary}`;
-            logActivity(agentName, agent.name, "tool_result", `${tc.tool}: success`);
-          } else {
-            finalText = `I hit a snag with ${tc.tool}: ${result.error}. Want me to try another approach?`;
-            logActivity(agentName, agent.name, "tool_error", `${tc.tool}: ${result.error?.slice(0, 100)}`);
-          }
-        } catch (toolErr) {
-          finalText = `Tool error: ${toolErr.message}. Let me try a different approach.`;
-          logActivity(agentName, agent.name, "tool_error", `${tc.tool}: ${toolErr.message.slice(0, 100)}`);
-        }
+    if (trace.length > 0) {
+      logActivity(agentName, agent.name, "tool_use", `Ran ${trace.length} tool step(s): ${trace.map((entry) => entry.tool).join(", ")}`);
+      for (const entry of trace) {
+        const failed = entry.result && entry.result.success === false;
+        const detail = failed
+          ? `${entry.tool}: ${(entry.result.error || "failed").slice(0, 100)}`
+          : `${entry.tool}: success`;
+        logActivity(agentName, agent.name, failed ? "tool_error" : "tool_result", detail);
       }
     }
 
@@ -1428,6 +1442,7 @@ async function invokeAgent(agentName, userMessage, sessionId = null, options = {
       elapsed: totalElapsed,
       tokens: totalInputTokens + totalOutputTokens,
       taskId,
+      toolTrace: publicTrace(trace),
     };
   } catch (err) {
     // Update task record with error
@@ -1801,6 +1816,7 @@ RULES:
 2. Talk in plain, warm, friendly language. Keep responses under 150 words. No jargon.
 3. When you need to execute a task, output EXACTLY this on its own line (nothing else on that line):
    <tool_call>{"tool":"TOOLNAME","params":{...}}</tool_call>
+   If native tools are provided, use those. Each result comes back so you can call the next tool before you answer.
 4. Available tools:
    - elevenlabs_tts: params: {text, voice_id?} — generates an MP3 audio file
    - generate_image: params: {prompt, width?, height?} — creates an image using Leonardo AI / DALL-E
@@ -1853,6 +1869,9 @@ async function tryLearnedLocalAnswer(messages, options = {}) {
   try {
     const result = await knowledgeIndex.answer(Array.isArray(messages) ? messages : [], {
       maxTokens: options.maxTokens,
+      tools: toolSchemas(),
+      executeTool: (name, args) => executeRegisteredTool(name, args),
+      userConfirmed: options.userConfirmed,
     });
     if (result.ok && typeof result.text === "string") {
       learnSkipLog.clear();
@@ -1873,47 +1892,34 @@ async function tryLearnedLocalAnswer(messages, options = {}) {
 
 async function callLLM(messages, model, options = {}) {
   if (options.useLocalNotes && !model) {
-    const local = await tryLearnedLocalAnswer(messages, { maxTokens: 4096 });
-    if (local.ok && typeof local.text === "string") return local.text;
+    const local = await tryLearnedLocalAnswer(messages, { maxTokens: options.maxTokens || 4096 });
+    if (local.ok && typeof local.text === "string") {
+      const payload = {
+        text: local.text,
+        trace: local.trace || [],
+        steps: local.steps || 0,
+        stopReason: "final",
+        model: local.model,
+        source: "local",
+        usage: {},
+      };
+      return options.returnMeta ? payload : payload.text;
+    }
   }
-  const m = model || LLM_MODEL;
-  return await withRetry(async () => {
-    const r = await fetch(`${LLM_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${LLM_API_KEY}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://meetaudreyevans.com",
-        "X-Title": "MindMappr"
-      },
-      body: JSON.stringify({ model: m, messages, max_tokens: 4096, temperature: 0.7 })
-      // 2026-11-26: retired duplicate body from a merge. The line above is the live request.
-      // body: JSON.stringify({ model: m, messages, max_tokens: 16384, temperature: 0.7 })
-    });
-    if (!r.ok) { const t = await r.text(); throw new Error(`LLM ${r.status}: ${t.slice(0, 200)}`); }
-    const d = await r.json();
-    return d.choices?.[0]?.message?.content || "No response.";
-  }, { retries: 3, baseDelay: 1500, label: "AI model" });
+  const result = await completeWithTools(messages, {
+    model: model || LLM_MODEL,
+    maxTokens: options.maxTokens || 4096,
+    referer: "https://meetaudreyevans.com",
+    title: "MindMappr",
+  });
+  if (result.success === false) return result;
+  if (options.returnMeta) return result;
+  return result.text || "No response.";
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Tool call parser (v5 — supports both single + multi-step) ───────────────
 // ══════════════════════════════════════════════════════════════════════════════
-function parseToolCall(text) {
-  const m = text.match(/<tool_call>([\s\S]*?)<\/tool_call>/);
-  if (!m) return null;
-  try { return JSON.parse(m[1].trim()); } catch { return null; }
-}
-
-function parseTaskPlan(text) {
-  const m = text.match(/<task_plan>([\s\S]*?)<\/task_plan>/);
-  if (!m) return null;
-  try {
-    const plan = JSON.parse(m[1].trim());
-    return Array.isArray(plan) ? plan : null;
-  } catch { return null; }
-}
-
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Tool executor (v5 — with retry wrapping) ────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2550,12 +2556,15 @@ async function executeTool(tool, params) {
     if (!accessToken) {
       return { success: false, error: "Google not connected. Please connect Google in the Connections tab first." };
     }
+    const filename = params.filename;
+    if (!filename) {
+      return { success: false, error: "filename is required.", missing: "filename", hint: "Create the file first, then call upload_to_drive with that filename." };
+    }
+    const fpath = join(UPLOADS_DIR, basename(filename));
+    if (!existsSync(fpath)) {
+      return { success: false, error: `File not found: ${filename}.`, missing: "filename", hint: "Create the file first with create_pdf, create_csv, create_real_pdf, or run_python, then call upload_to_drive with that filename." };
+    }
     return await withRetry(async () => {
-      const filename = params.filename;
-      if (!filename) throw new Error("filename is required.");
-      const fpath = join(UPLOADS_DIR, basename(filename));
-      if (!existsSync(fpath)) throw new Error(`File not found: ${filename}. Upload it first or create it with another tool.`);
-
       const fileSize = statSync(fpath).size;
       const MAX_SIZE = 50 * 1024 * 1024; // 50MB limit
       if (fileSize > MAX_SIZE) throw new Error(`File too large (${Math.round(fileSize / 1024 / 1024)}MB). Maximum is 50MB.`);
@@ -2776,8 +2785,8 @@ async function executeTool(tool, params) {
       if (!client || !client.isReady()) return { success: false, error: "Discord bot is not connected. Please connect Discord in the Connections tab." };
       const channelId = params.channelId;
       const message = params.message;
-      if (!channelId) return { success: false, error: "channelId is required." };
-      if (!message) return { success: false, error: "message is required." };
+      if (!channelId) return { success: false, error: "channelId is required.", missing: "channelId", hint: "call discord_list_channels first" };
+      if (!message) return { success: false, error: "message is required.", missing: "message", hint: "Pass the message text to send." };
       const channel = await client.channels.fetch(channelId);
       if (!channel) return { success: false, error: `Channel ${channelId} not found.` };
       await channel.send(message);
@@ -2894,11 +2903,15 @@ async function executeTool(tool, params) {
   if (tool === "stripe_create_invoice") {
     const STRIPE_KEY = process.env.STRIPE_SECRET_KEY;
     if (!STRIPE_KEY) return { success: false, error: "Stripe not configured. Set STRIPE_SECRET_KEY env var." };
+    const customerId = params.customer_id;
+    const items = params.items;
+    if (!customerId) {
+      return { success: false, error: "customer_id is required.", missing: "customer_id", hint: "call stripe_list_customers first" };
+    }
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return { success: false, error: "items array is required (each with description and amount in cents).", missing: "items", hint: "Pass at least one item with description and amount." };
+    }
     return await withRetry(async () => {
-      const customerId = params.customer_id;
-      const items = params.items;
-      if (!customerId) throw new Error("customer_id is required.");
-      if (!items || !Array.isArray(items) || items.length === 0) throw new Error("items array is required (each with description and amount in cents).");
       // Create invoice
       const invRes = await fetch("https://api.stripe.com/v1/invoices", {
         method: "POST",
@@ -3538,7 +3551,7 @@ async function executeTool(tool, params) {
   if (tool === "execute_skill") {
     const skillId = (params.skill_id || params.name || "").toLowerCase().replace(/[^a-z0-9_-]/g, "_");
     const input = params.input || params.prompt || "";
-    if (!skillId) return { success: false, error: "Please provide a skill_id or name." };
+    if (!skillId) return { success: false, error: "skill_id is required.", missing: "skill_id", hint: "call load_skill first" };
 
     // Check in-memory first
     let skill = loadedSkills.get(skillId);
@@ -3546,7 +3559,7 @@ async function executeTool(tool, params) {
       // Try loading from DB
       const dbSkill = db.prepare("SELECT * FROM skills WHERE id = ? AND enabled = 1").get(skillId);
       if (!dbSkill || !dbSkill.implementation_content) {
-        return { success: false, error: `Skill "${skillId}" not found or not loaded. Use load_skill first.` };
+        return { success: false, error: `Skill "${skillId}" not found or not loaded.`, missing: "skill_id", hint: "call load_skill first" };
       }
       skill = { id: dbSkill.id, name: dbSkill.name, type: dbSkill.implementation_type, content: dbSkill.implementation_content };
       loadedSkills.set(skillId, skill);
@@ -3626,58 +3639,6 @@ async function executeTool(tool, params) {
 // ══════════════════════════════════════════════════════════════════════════════
 // ── v5: Multi-Step Task Planner ─────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
-async function executeTaskPlan(plan, progressCallback) {
-  const results = {};
-  const files = [];
-
-  for (let i = 0; i < plan.length; i++) {
-    const step = plan[i];
-    const stepNum = step.step || (i + 1);
-    const desc = step.description || `Step ${stepNum}`;
-
-    if (progressCallback) progressCallback(stepNum, plan.length, desc, "running");
-
-    let paramsStr = JSON.stringify(step.params || {});
-    for (const [key, val] of Object.entries(results)) {
-      const ref = `{{${key}.file}}`;
-      if (paramsStr.includes(ref) && val.file) {
-        paramsStr = paramsStr.replace(new RegExp(ref.replace(/[{}]/g, '\\$&'), 'g'), val.file);
-      }
-    }
-    let resolvedParams;
-    try { resolvedParams = JSON.parse(paramsStr); } catch { resolvedParams = step.params || {}; }
-
-    const result = await executeTool(step.tool, resolvedParams);
-    results[`step${stepNum}`] = result;
-
-    if (result.success && result.file) {
-      files.push({ name: result.file, type: result.type, message: result.message, step: stepNum });
-    }
-
-    if (progressCallback) {
-      progressCallback(stepNum, plan.length, desc, result.success ? "done" : "failed");
-    }
-
-    if (!result.success) {
-      return {
-        success: false,
-        completedSteps: i,
-        totalSteps: plan.length,
-        error: `Step ${stepNum} (${desc}) failed: ${result.error}`,
-        files
-      };
-    }
-  }
-
-  return {
-    success: true,
-    completedSteps: plan.length,
-    totalSteps: plan.length,
-    files,
-    lastResult: results[`step${plan.length}`]
-  };
-}
-
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Content Studio — CreatorBuddy-style AI Content Creation Suite ─────────────
 // ══════════════════════════════════════════════════════════════════════════════
@@ -4427,6 +4388,7 @@ app.post("/api/chat", async (req, res) => {
     let generatedFile = null;
     let planProgress = null;
     let respondingAgent = null;
+    let responseToolTrace = null;
 
     if (agentName) {
       // Direct agent invocation via @mention
@@ -4434,6 +4396,7 @@ app.post("/api/chat", async (req, res) => {
       try {
         const agentResult = await invokeAgent(agentName, cleanMessage, sid, { useLocalNotes: !model });
         reply = agentResult.text;
+        if (agentResult.toolTrace && agentResult.toolTrace.length > 0) responseToolTrace = agentResult.toolTrace;
         respondingAgent = { name: allDefs[agentName].name, icon: allDefs[agentName].icon, id: agentName };
 
         // Check if Rex delegated to other agents
@@ -4471,6 +4434,7 @@ app.post("/api/chat", async (req, res) => {
         try {
           const rexResult = await invokeAgent("rex", userContent, sid, { useLocalNotes: !model });
           reply = rexResult.text;
+          if (rexResult.toolTrace && rexResult.toolTrace.length > 0) responseToolTrace = rexResult.toolTrace;
           respondingAgent = { name: "Rex", icon: "🧠", id: "rex" };
 
           // Handle delegations
@@ -4500,48 +4464,28 @@ app.post("/api/chat", async (req, res) => {
         const systemWithMemory = SYSTEM_PROMPT + (memoryCtx ? `\n\n[MEMORY — What you know about this user and their projects]\n${memoryCtx}` : "");
 
         const msgs = [{ role: "system", content: systemWithMemory }, ...history.slice(-30), { role: "user", content: userContent }];
-        reply = await callLLM(msgs, model, { useLocalNotes: !model });
+        const outcome = await callLLM(msgs, model, { useLocalNotes: !model, returnMeta: true });
 
-        // Handle retry failure from callLLM
-        if (reply && typeof reply === "object" && reply.success === false) {
-          return res.json({ success: true, data: { reply: reply.error, sessionId: sid, generatedFile: null } });
+        if (outcome && typeof outcome === "object" && outcome.success === false) {
+          return res.json({ success: true, data: { reply: outcome.error, sessionId: sid, generatedFile: null } });
         }
 
-        // v5: Check for multi-step task plan first
-        const plan = parseTaskPlan(reply);
-        if (plan && plan.length > 1) {
-          const planResult = await executeTaskPlan(plan);
-          if (planResult.success && planResult.files.length > 0) {
-            const lastFile = planResult.files[planResult.files.length - 1];
-            generatedFile = { name: lastFile.name, type: lastFile.type, message: lastFile.message };
-            planProgress = { steps: plan.map((s, i) => ({ step: s.step || i + 1, description: s.description, status: "done" })) };
-            // DIRECT output — no LLM rewriting
-            reply = `All ${planResult.totalSteps} steps completed. File created: ${lastFile.name}. ${lastFile.message}`;
-          } else if (!planResult.success) {
-            reply = `I got through ${planResult.completedSteps} of ${planResult.totalSteps} steps, but hit a snag: ${planResult.error}. Want me to try a different approach?`;
-            if (planResult.files.length > 0) {
-              const lastFile = planResult.files[planResult.files.length - 1];
-              generatedFile = { name: lastFile.name, type: lastFile.type, message: lastFile.message };
-            }
-          }
-        } else {
-          // Single tool call (v4 behavior preserved)
-          const tc = parseToolCall(reply);
-          if (tc) {
-            const result = await executeTool(tc.tool, tc.params || {});
-            if (result.success && result.file) {
-              generatedFile = { name: result.file, type: result.type, message: result.message };
-              // DIRECT output — no LLM rewriting
-              reply = `File created: ${result.file}. ${result.message || 'Ready for download.'}`;
-            } else if (result.success && result.output) {
-              // DIRECT output — no LLM rewriting
-              reply = `Code executed. Output:\n${result.output}`;
-            } else if (!result.success) {
-              reply = `I hit a snag: ${result.error}. Want me to try another approach?`;
-            }
-          } else {
-            reply = (typeof reply === "string" ? reply : "").replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "").replace(/<task_plan>[\s\S]*?<\/task_plan>/g, "").trim();
-          }
+        reply = typeof outcome === "string" ? outcome : (outcome.text || "");
+        const trace = outcome && outcome.trace ? outcome.trace : [];
+        if (trace.length > 0) responseToolTrace = publicTrace(trace);
+        const fileEntry = [...trace].reverse().find((entry) => entry.result && entry.result.success && entry.result.file);
+        if (fileEntry) {
+          generatedFile = { name: fileEntry.result.file, type: fileEntry.result.type, message: fileEntry.result.message };
+        }
+        const planSteps = trace.filter((entry) => entry.via === "task_plan");
+        if (planSteps.length > 0) {
+          planProgress = {
+            steps: planSteps.map((entry) => ({
+              step: entry.planStep,
+              description: entry.description,
+              status: entry.result && entry.result.success === false ? "failed" : "done",
+            })),
+          };
         }
       }
     }
@@ -4561,6 +4505,7 @@ app.post("/api/chat", async (req, res) => {
 
     const responseData = { reply, sessionId: sid, generatedFile };
     if (planProgress) responseData.planProgress = planProgress;
+    if (responseToolTrace && responseToolTrace.length > 0) responseData.toolTrace = responseToolTrace;
     if (respondingAgent) responseData.respondingAgent = respondingAgent;
 
     res.json({ success: true, data: responseData });
@@ -4948,11 +4893,9 @@ function startCronJob(task) {
       } else if (task.task_type === "tool") {
         await executeTool(config.tool, config.params || {});
       } else if (task.task_type === "chat") {
-        const msgs = [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: config.message }];
-        const reply = await callLLM(msgs);
-        if (typeof reply === "string") {
-          const tc = parseToolCall(reply);
-          if (tc) await executeTool(tc.tool, tc.params || {});
+        const reply = await callLLM([{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: config.message }]);
+        if (reply && typeof reply === "object" && reply.success === false) {
+          throw new Error(reply.error || "Scheduled chat failed");
         }
       } else if (task.task_type === "webhook") {
         await fetch(config.url, {

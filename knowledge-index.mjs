@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from "fs";
 import { homedir } from "os";
 import { join, resolve, sep } from "path";
+import { runAgentLoop } from "./agent-loop.mjs";
 
 const DEFAULT_BASE_URL = "http://localhost:1234/v1";
 const DEFAULT_TOP_K = 5;
@@ -19,6 +20,14 @@ const STOP_WORDS = new Set([
 ]);
 
 const EMBEDDING_MODEL_PATTERN = /embed|nomic|e5|bge|gte|minilm/i;
+const TOOL_CAPABLE_PATTERN = /qwen|hermes|functionary|firefunction|tool-use|tool_use/i;
+
+export function pickChatModel(ids) {
+  const list = Array.isArray(ids) ? ids.filter((id) => typeof id === "string" && id.length > 0) : [];
+  const chat = list.filter((id) => !EMBEDDING_MODEL_PATTERN.test(id));
+  const capable = chat.find((id) => TOOL_CAPABLE_PATTERN.test(id));
+  return capable || chat[0] || list[0] || "";
+}
 
 export function defaultIndexDir() {
   if (process.env.MINDMAPPR_INDEX_DIR) return process.env.MINDMAPPR_INDEX_DIR;
@@ -293,7 +302,14 @@ export class KnowledgeIndex {
       if (picked.length > 0) retrieval = "keyword";
     }
     const outbound = withNotes(messages, picked);
-    const chat = await this.chat(outbound, { maxTokens: options.maxTokens });
+    const chat = await this.chat(outbound, {
+      maxTokens: options.maxTokens,
+      tools: options.tools,
+      executeTool: options.executeTool,
+      confirmRequired: options.confirmRequired,
+      userConfirmed: options.userConfirmed,
+      maxSteps: options.maxSteps,
+    });
     return {
       ...chat,
       retrieval,
@@ -343,7 +359,7 @@ export class KnowledgeIndex {
       const ids = Array.isArray(data?.data)
         ? data.data.map((item) => item && item.id).filter((id) => typeof id === "string" && id.length > 0)
         : [];
-      return ids.find((id) => !EMBEDDING_MODEL_PATTERN.test(id)) || ids[0] || "";
+      return pickChatModel(ids);
     } catch {
       return "";
     }
@@ -352,10 +368,14 @@ export class KnowledgeIndex {
   async chat(messages, options = {}) {
     const started = Date.now();
     const maxTokens = normalizeMaxTokens(options.maxTokens);
+    const tools = Array.isArray(options.tools) ? options.tools : [];
     try {
       const model = this.model || await this.pickModel();
       if (!model) {
         return { ok: false, reason: "lm-studio-unavailable", elapsed: Date.now() - started };
+      }
+      if (tools.length > 0 && typeof options.executeTool === "function") {
+        return await this.chatWithTools(messages, options, model, tools, maxTokens, started);
       }
       const response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
         method: "POST",
@@ -373,6 +393,64 @@ export class KnowledgeIndex {
       }
       return { ok: true, text, model, elapsed: Date.now() - started };
     } catch {
+      return { ok: false, reason: "lm-studio-unavailable", elapsed: Date.now() - started };
+    }
+  }
+
+  async chatWithTools(messages, options, model, tools, maxTokens, started) {
+    try {
+      const loop = await runAgentLoop({
+        messages,
+        tools,
+        executeTool: options.executeTool,
+        maxSteps: options.maxSteps,
+        timeoutMs: this.chatTimeoutMs,
+        confirmRequired: options.confirmRequired,
+        userConfirmed: options.userConfirmed,
+        chat: async (outbound, requestTools, meta) => {
+          const body = { model, messages: outbound, temperature: 0.7, max_tokens: maxTokens };
+          if (meta.nativeTools && requestTools.length > 0) body.tools = requestTools;
+          const response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
+            method: "POST",
+            headers: this.headers(),
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(this.chatTimeoutMs),
+          });
+          if (!response.ok) {
+            const err = new Error(`lm-studio-http-${response.status}`);
+            err.status = response.status;
+            err.reason = `lm-studio-http-${response.status}`;
+            try { err.body = await response.text(); } catch { err.body = ""; }
+            throw err;
+          }
+          const data = await response.json();
+          const message = data?.choices?.[0]?.message;
+          if (!message || (typeof message.content !== "string" && !Array.isArray(message.tool_calls))) {
+            const err = new Error("lm-studio-empty");
+            err.reason = "lm-studio-empty";
+            throw err;
+          }
+          return { message, usage: data.usage };
+        },
+      });
+      const text = typeof loop.text === "string" ? loop.text : "";
+      if (!text.trim()) {
+        return { ok: false, reason: "lm-studio-empty", model, elapsed: Date.now() - started, trace: loop.trace };
+      }
+      return { ok: true, text, model, elapsed: Date.now() - started, trace: loop.trace, steps: loop.steps };
+    } catch (err) {
+      if (err && Array.isArray(err.trace) && err.trace.some((entry) => entry.result && entry.result.success === true)) {
+        return {
+          ok: true,
+          text: "A tool finished, but the local model stopped before the answer.",
+          model,
+          elapsed: Date.now() - started,
+          trace: err.trace,
+        };
+      }
+      if (err && err.reason) {
+        return { ok: false, reason: err.reason, model, elapsed: Date.now() - started };
+      }
       return { ok: false, reason: "lm-studio-unavailable", elapsed: Date.now() - started };
     }
   }

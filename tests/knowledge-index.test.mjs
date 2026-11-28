@@ -7,6 +7,7 @@ import {
   KnowledgeIndex,
   cosineSimilarity,
   keywordScore,
+  pickChatModel,
   rankByCosine,
   rankByKeyword,
 } from "../knowledge-index.mjs";
@@ -234,6 +235,45 @@ test("an HTTP error from LM Studio is a miss", async () => {
   const result = await index.answer([{ role: "user", content: "hello" }]);
   assert.equal(result.ok, false);
   assert.equal(result.reason, "lm-studio-http-503");
+});
+
+test("local chat runs a tool and sends the result back", async () => {
+  const calls = [];
+  const index = new KnowledgeIndex({
+    dir: tempIndex(),
+    model: "qwen-local",
+    fetchImpl: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      calls.push(body);
+      const toolMsgs = body.messages.filter((message) => message.role === "tool");
+      if (toolMsgs.length === 0) {
+        return jsonResponse(200, {
+          choices: [{
+            message: {
+              content: null,
+              tool_calls: [{ id: "t1", type: "function", function: { name: "lookup", arguments: "{\"q\":\"lidar\"}" } }],
+            },
+          }],
+        });
+      }
+      return jsonResponse(200, { choices: [{ message: { content: "from the tool" } }] });
+    },
+  });
+  const result = await index.answer([{ role: "user", content: "where is lidar" }], {
+    tools: [{ type: "function", function: { name: "lookup", parameters: { type: "object", properties: {} } } }],
+    executeTool: async (_name, args) => ({ success: true, q: args.q }),
+    confirmRequired: [],
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.text, "from the tool");
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].messages.find((message) => message.role === "tool").content, /lidar/);
+});
+
+test("an unset model prefers a tool-capable LM Studio model", () => {
+  assert.equal(pickChatModel(["nomic-embed", "llama-3-8b", "qwen2.5-7b-instruct"]), "qwen2.5-7b-instruct");
+  assert.equal(pickChatModel(["llama-3-8b", "nomic-embed"]), "llama-3-8b");
+  assert.equal(pickChatModel(["nomic-embed"]), "nomic-embed");
 });
 
 test("the chat model is chosen from LM Studio when none is configured", async () => {
