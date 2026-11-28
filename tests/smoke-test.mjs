@@ -83,6 +83,7 @@ function testRequiredFiles() {
     "rex-tools.mjs",
     "discord-connector.mjs",
     "knowledge-index.mjs",
+    "agent-loop.mjs",
   ];
   let allExist = true;
   for (const f of requiredFiles) {
@@ -136,8 +137,9 @@ function testNodeModules() {
 // ── Test 5: Syntax check server.mjs ─────────────────────────────────────────
 function testSyntaxCheck() {
   try {
-    execSync(`node --check ${join(ROOT, "server.mjs")}`, { timeout: 10000, stdio: "pipe" });
-    execSync(`node --check ${join(ROOT, "knowledge-index.mjs")}`, { timeout: 10000, stdio: "pipe" });
+    for (const file of ["server.mjs", "knowledge-index.mjs", "agent-loop.mjs", "rex-tools.mjs"]) {
+      execSync(`node --check ${join(ROOT, file)}`, { timeout: 10000, stdio: "pipe" });
+    }
     pass("server.mjs syntax check");
   } catch (e) {
     fail("server.mjs syntax check", e.stderr?.toString()?.slice(0, 200) || e.message);

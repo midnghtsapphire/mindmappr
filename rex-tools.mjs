@@ -72,6 +72,14 @@ export async function github_list_repos() {
 }
 
 export async function github_create_pr(repo, title, head, base = "main", body = "") {
+  if (!head) {
+    return {
+      success: false,
+      error: "A branch is required to open a pull request.",
+      missing: "head",
+      hint: "Push a branch first, then call github_create_pr with head set to that branch name.",
+    };
+  }
   const data = await ghFetch(`https://api.github.com/repos/${repo}/pulls`, {
     method: "POST",
     body: JSON.stringify({ title, head, base, body }),
@@ -715,6 +723,48 @@ export const EXTRA_TOOLS = {
     params: ["repo", "auto_load"],
     example: 'TOOL:scan_repo_skills:{"repo":"midnghtsapphire/revvel-skills-vault","auto_load":true}',
   },
+  elevenlabs_tts: {
+    category: "Media",
+    description: "Generate an MP3 from text with ElevenLabs",
+    params: ["text", "voice_id?"],
+    example: 'TOOL:elevenlabs_tts:{"text":"Hello from MindMappr"}',
+  },
+  create_pdf: {
+    category: "Document",
+    description: "Create a Markdown document",
+    params: ["title", "content"],
+    example: 'TOOL:create_pdf:{"title":"Notes","content":"Hello"}',
+  },
+  run_python: {
+    category: "Utility",
+    description: "Run Python code. reportlab, openpyxl, and matplotlib are available.",
+    params: ["code", "output_file?"],
+    example: 'TOOL:run_python:{"code":"print(1)"}',
+  },
+  web_scrape: {
+    category: "Search",
+    description: "Fetch a URL and return its visible text",
+    params: ["url"],
+    example: 'TOOL:web_scrape:{"url":"https://example.com"}',
+  },
+  create_csv: {
+    category: "Document",
+    description: "Create a CSV file",
+    params: ["filename?", "headers", "rows"],
+    example: 'TOOL:create_csv:{"filename":"data.csv","headers":["Name"],"rows":[["A"]]}',
+  },
+  create_html: {
+    category: "Document",
+    description: "Save an HTML file",
+    params: ["filename?", "html"],
+    example: 'TOOL:create_html:{"filename":"page.html","html":"<p>Hello</p>"}',
+  },
+  send_slack: {
+    category: "Slack",
+    description: "Send a Slack message when Slack is connected",
+    params: ["message", "channel?"],
+    example: 'TOOL:send_slack:{"message":"Hello","channel":"#general"}',
+  },
 };
 
 /**
@@ -778,6 +828,6 @@ export function getToolListForPrompt() {
   }
   prompt += `\nEXAMPLES:\nTOOL:github_list_repos\nTOOL:do_list_apps\nTOOL:llm_call:anthropic/claude-sonnet-4:Write a haiku about coding\n`;
   prompt += `\nDOCUMENT, MEDIA & GOOGLE TOOLS (use JSON params):\nTOOL:create_real_pdf:{"title":"Report","content":"Content here","sections":[{"heading":"Section 1","body":"Details"}]}\nTOOL:create_spreadsheet:{"filename":"data.xlsx","sheets":[{"name":"Sheet1","headers":["Name","Value"],"rows":[["A","1"]]}]}\nTOOL:fill_pdf:{"document_id":"12345","fields":{"Name":"John Doe","Date":"2026-04-04"}}\nTOOL:generate_image:{"prompt":"A futuristic city at sunset","width":1024,"height":1024}\nTOOL:create_video:{"script":"Welcome to MindMappr!","title":"Intro Video"}\nTOOL:send_email:{"to":"user@example.com","subject":"Hello","body":"Hi there!"}\nTOOL:read_email:{"query":"is:unread","maxResults":5}\nTOOL:upload_to_drive:{"filename":"report.pdf"}\nTOOL:create_google_doc:{"title":"Meeting Notes","content":"Notes from today..."}\nTOOL:create_google_sheet:{"title":"Budget","sheets":[{"name":"Q1","headers":["Item","Cost"],"rows":[["Hosting","$50"]]}]}\n`;
-  prompt += `\nRULES FOR TOOL USE:\n1. Put each TOOL: call on its own line\n2. Parameters are colon-separated for simple tools, or use JSON for document/Google tools\n3. You can use multiple tools in one response\n4. After tools execute, you'll get results to summarize for the user\n5. Only use tools when the user's request requires real action (creating, listing, deploying, etc.)\n6. For Google tools (send_email, read_email, upload_to_drive, create_google_doc, create_google_sheet), Google must be connected first\n`;
+  prompt += `\nRULES FOR TOOL USE:\n1. Put each TOOL: call on its own line\n2. Parameters are colon-separated for simple tools, or use JSON for document/Google tools\n3. You can use multiple tools in one response\n4. Each tool result is sent back to you. Use it for the next tool or to answer the user. Do not invent results.\n5. Only use tools when the user's request requires real action (creating, listing, deploying, etc.)\n6. For Google tools (send_email, read_email, upload_to_drive, create_google_doc, create_google_sheet), Google must be connected first\n7. Merging a pull request, restarting an app, sending email, Slack, or Discord, and creating a Stripe invoice run only when the user's latest message asks for that action.\n`;
   return prompt;
 }

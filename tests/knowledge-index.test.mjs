@@ -6,7 +6,10 @@ import { test } from "node:test";
 import {
   KnowledgeIndex,
   cosineSimilarity,
+  fitContext,
   keywordScore,
+  normalizeForTemplate,
+  pickChatModel,
   rankByCosine,
   rankByKeyword,
 } from "../knowledge-index.mjs";
@@ -131,11 +134,13 @@ test("keyword retrieval puts the matching note in the chat request", async () =>
   assert.equal(calls.length, 1);
   assert.match(calls[0].url, /\/chat\/completions$/);
   const sent = calls[0].body.messages;
+  assert.equal(sent.filter((message) => message.role === "system").length, 1);
   assert.equal(sent[0].role, "system");
-  assert.equal(sent[0].content, "You are MindMappr.");
-  assert.match(sent[1].content, /lidar source links/);
-  assert.match(sent[1].content, /knowledge\/lidar\.md/);
-  assert.equal(sent[2].content, "Where are the lidar links?");
+  assert.match(sent[0].content, /You are MindMappr/);
+  assert.match(sent[0].content, /lidar source links/);
+  assert.match(sent[0].content, /knowledge\/lidar\.md/);
+  assert.equal(sent[1].role, "user");
+  assert.equal(sent[1].content, "Where are the lidar links?");
   assert.equal(calls[0].body.model, "qwen-local");
   assert.equal(calls[0].body.max_tokens, 4096);
   assert.equal(calls[0].headers.Authorization, undefined);
@@ -234,6 +239,45 @@ test("an HTTP error from LM Studio is a miss", async () => {
   const result = await index.answer([{ role: "user", content: "hello" }]);
   assert.equal(result.ok, false);
   assert.equal(result.reason, "lm-studio-http-503");
+});
+
+test("local chat runs a tool and sends the result back", async () => {
+  const calls = [];
+  const index = new KnowledgeIndex({
+    dir: tempIndex(),
+    model: "qwen-local",
+    fetchImpl: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      calls.push(body);
+      const toolMsgs = body.messages.filter((message) => message.role === "tool");
+      if (toolMsgs.length === 0) {
+        return jsonResponse(200, {
+          choices: [{
+            message: {
+              content: null,
+              tool_calls: [{ id: "t1", type: "function", function: { name: "lookup", arguments: "{\"q\":\"lidar\"}" } }],
+            },
+          }],
+        });
+      }
+      return jsonResponse(200, { choices: [{ message: { content: "from the tool" } }] });
+    },
+  });
+  const result = await index.answer([{ role: "user", content: "where is lidar" }], {
+    tools: [{ type: "function", function: { name: "lookup", parameters: { type: "object", properties: {} } } }],
+    executeTool: async (_name, args) => ({ success: true, q: args.q }),
+    confirmRequired: [],
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.text, "from the tool");
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].messages.find((message) => message.role === "tool").content, /lidar/);
+});
+
+test("an unset model prefers a tool-capable LM Studio model", () => {
+  assert.equal(pickChatModel(["nomic-embed", "llama-3-8b", "qwen2.5-7b-instruct"]), "qwen2.5-7b-instruct");
+  assert.equal(pickChatModel(["llama-3-8b", "nomic-embed"]), "llama-3-8b");
+  assert.equal(pickChatModel(["nomic-embed"]), "nomic-embed");
 });
 
 test("the chat model is chosen from LM Studio when none is configured", async () => {
@@ -335,4 +379,177 @@ test("a byte-order mark on chunks.json still loads", async () => {
   assert.equal(result.indexStatus, "ok");
   assert.equal(result.chunks[0].id, "lidar");
   rmSync(dir, { recursive: true, force: true });
+});
+
+test("chat messages are merged into one system and strict user/assistant turns", () => {
+  const normalized = normalizeForTemplate([
+    { role: "system", content: "You are MindMappr." },
+    { role: "system", content: "Notes from the local MindMappr knowledge index.\n\nlidar" },
+    { role: "user", content: "first" },
+    { role: "user", content: "second" },
+    { role: "assistant", content: null, tool_calls: [{ id: "1", type: "function", function: { name: "lookup", arguments: "{\"q\":\"lidar\"}" } }] },
+    { role: "tool", tool_call_id: "1", content: "{\"hit\":\"lidar\"}" },
+  ], { textTools: true });
+  assert.equal(normalized.filter((message) => message.role === "system").length, 1);
+  assert.match(normalized[0].content, /You are MindMappr/);
+  assert.match(normalized[0].content, /lidar/);
+  assert.deepEqual(normalized.slice(1).map((message) => message.role), ["user", "assistant", "user"]);
+  assert.equal(normalized.some((message) => message.role === "tool"), false);
+  assert.match(normalized[2].content, /TOOL:lookup/);
+  assert.match(normalized[3].content, /Tool results/);
+});
+
+test("a conversation that starts with the assistant gets a user turn first", () => {
+  const normalized = normalizeForTemplate([
+    { role: "assistant", content: "hello" },
+    { role: "assistant", content: "still here" },
+  ], { textTools: true });
+  assert.deepEqual(normalized.map((message) => message.role), ["user", "assistant"]);
+  assert.match(normalized[1].content, /hello/);
+  assert.match(normalized[1].content, /still here/);
+});
+
+test("an unloaded model or a 27B model is not chosen on its own", () => {
+  assert.equal(pickChatModel([
+    { id: "qwen/qwen3.5-9b", state: "not-loaded" },
+    { id: "qwen/qwen3.8-27b", state: "loaded", loaded_context_length: 8192 },
+    { id: "mindmappr-local", state: "loaded", loaded_context_length: 8192 },
+    { id: "google/gemma-3-4b", state: "loaded", loaded_context_length: 131072 },
+    { id: "nomic-embed-text", state: "loaded" },
+  ]), "mindmappr-local");
+  assert.equal(pickChatModel([
+    { id: "google/gemma-3-4b", state: "loaded" },
+    { id: "qwen/qwen3.5-9b", state: "loaded" },
+    { id: "qwen/qwen3.8-27b", state: "loaded" },
+  ]), "qwen/qwen3.5-9b");
+  assert.equal(pickChatModel([{ id: "qwen/qwen3.8-27b", state: "loaded" }]), "");
+  assert.equal(pickChatModel([{ id: "qwen/qwen3.5-9b", state: "not-loaded" }]), "");
+  assert.equal(pickChatModel(["qwen/qwen3.8-27b", "google/gemma-3-4b"]), "google/gemma-3-4b");
+});
+
+test("old history is trimmed before the latest question", () => {
+  const history = [{
+    role: "system",
+    content: `You are MindMappr.\n\nNotes from the local MindMappr knowledge index.\n${"n".repeat(8000)}`,
+  }];
+  for (let i = 0; i < 12; i++) {
+    history.push({ role: "user", content: `old question ${i} ${"q".repeat(800)}` });
+    history.push({ role: "assistant", content: `old answer ${i} ${"a".repeat(800)}` });
+  }
+  history.push({ role: "user", content: "keep this question" });
+  const fitted = fitContext(history, { contextLength: 8192, ratio: 0.75, textTools: true });
+  const joined = fitted.map((message) => message.content || "").join("\n");
+  assert.match(joined, /keep this question/);
+  assert.doesNotMatch(joined, /old question 0/);
+  assert.equal(fitted.filter((message) => message.role === "system").length, 1);
+  const roles = fitted.filter((message) => message.role !== "system").map((message) => message.role);
+  roles.forEach((role, index) => {
+    assert.equal(role, index % 2 === 0 ? "user" : "assistant");
+  });
+});
+
+test("only a loaded model is sent to LM Studio", async () => {
+  let seen = "";
+  const index = new KnowledgeIndex({
+    dir: tempIndex(),
+    model: "",
+    fetchImpl: async (url, options) => {
+      if (String(url).includes("/api/v0/models")) {
+        return jsonResponse(200, {
+          data: [
+            { id: "qwen/qwen3.5-9b", state: "not-loaded" },
+            { id: "qwen/qwen3.8-27b", state: "not-loaded" },
+            { id: "mindmappr-local", state: "loaded", loaded_context_length: 8192 },
+            { id: "nomic-embed-text", state: "loaded" },
+          ],
+        });
+      }
+      seen = JSON.parse(options.body).model;
+      return jsonResponse(200, { choices: [{ message: { content: "local" } }] });
+    },
+  });
+  const result = await index.answer([{ role: "user", content: "hi" }]);
+  assert.equal(result.ok, true);
+  assert.equal(result.model, "mindmappr-local");
+  assert.equal(seen, "mindmappr-local");
+});
+
+test("an explicit local model is kept even when it is large", async () => {
+  let seen = "";
+  const index = new KnowledgeIndex({
+    dir: tempIndex(),
+    model: "qwen/qwen3.8-27b",
+    fetchImpl: async (_url, options) => {
+      seen = JSON.parse(options.body).model;
+      return jsonResponse(200, { choices: [{ message: { content: "explicit" } }] });
+    },
+  });
+  const result = await index.answer([{ role: "user", content: "hi" }]);
+  assert.equal(result.ok, true);
+  assert.equal(seen, "qwen/qwen3.8-27b");
+});
+
+test("a context overflow is trimmed harder and retried once", async () => {
+  const bodies = [];
+  const index = new KnowledgeIndex({
+    dir: tempIndex(),
+    model: "mindmappr-local",
+    fetchImpl: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      bodies.push(body);
+      if (bodies.length === 1) {
+        return jsonResponse(400, { error: "request (8381 tokens) exceeds the available context size (8192 tokens)" });
+      }
+      return jsonResponse(200, { choices: [{ message: { content: "short enough" } }] });
+    },
+  });
+  const messages = [];
+  for (let i = 0; i < 10; i++) {
+    messages.push({ role: "user", content: `earlier ${i} ${"x".repeat(1500)}` });
+    messages.push({ role: "assistant", content: `reply ${i} ${"y".repeat(1500)}` });
+  }
+  messages.push({ role: "user", content: "latest question" });
+  const result = await index.answer(messages);
+  assert.equal(result.ok, true);
+  assert.equal(result.text, "short enough");
+  assert.equal(bodies.length, 2);
+  const size = (body) => body.messages.map((message) => message.content || "").join("").length;
+  assert.ok(size(bodies[1]) < size(bodies[0]));
+  assert.match(bodies[1].messages.map((message) => message.content).join("\n"), /latest question/);
+});
+
+test("a Jinja template rejection is retried once as plain user and assistant text", async () => {
+  const bodies = [];
+  const index = new KnowledgeIndex({
+    dir: tempIndex(),
+    model: "google/gemma-3-4b",
+    fetchImpl: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      bodies.push(body);
+      if (bodies.length === 1) {
+        return jsonResponse(400, { error: "Unable to generate parser for this template. Jinja Exception: Conversation roles must alternate user/assistant/user/assistant/..." });
+      }
+      return jsonResponse(200, { choices: [{ message: { content: "alternating" } }] });
+    },
+  });
+  const result = await index.answer([
+    { role: "system", content: "You are MindMappr." },
+    { role: "system", content: "Notes from the local MindMappr knowledge index.\nlidar" },
+    { role: "user", content: "hello" },
+    { role: "user", content: "again" },
+  ]);
+  assert.equal(result.ok, true);
+  assert.equal(result.text, "alternating");
+  assert.equal(bodies.length, 2);
+  for (const body of bodies) {
+    assert.equal(body.tools, undefined);
+    assert.equal(body.messages.filter((message) => message.role === "system").length, 1);
+    assert.equal(body.messages.some((message) => message.role === "tool"), false);
+    const roles = body.messages.filter((message) => message.role !== "system").map((message) => message.role);
+    roles.forEach((role, index) => {
+      assert.equal(role, index % 2 === 0 ? "user" : "assistant");
+    });
+  }
+  assert.match(bodies[0].messages.find((message) => message.role === "user").content, /hello/);
+  assert.match(bodies[0].messages.find((message) => message.role === "user").content, /again/);
 });

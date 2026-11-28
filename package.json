@@ -5,7 +5,7 @@
   "main": "server.mjs",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test tests/knowledge-index.test.mjs && node tests/smoke-test.mjs",
+    "test": "node --test tests/knowledge-index.test.mjs tests/agent-loop.test.mjs && node tests/smoke-test.mjs",
     "predeploy": "node tests/smoke-test.mjs"
   },
   "dependencies": {

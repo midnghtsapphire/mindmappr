@@ -81,7 +81,9 @@ The default index folder is `%USERPROFILE%\mindmappr-brain\index` (`mindmappr-br
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `LM_STUDIO_BASE_URL` | `http://localhost:1234/v1` | OpenAI-compatible LM Studio server |
-| `LM_STUDIO_MODEL` | first loaded chat model | Model id sent to `/chat/completions` |
+| `LM_STUDIO_MODEL` | unset: a model LM Studio reports as loaded, preferring a tool-capable name such as qwen when one is loaded; otherwise the first loaded chat model. Models at 20B and above, including a 27B model, are not chosen unless this is set. | Model id sent to `/chat/completions` |
+| `AGENT_LOOP_MAX_STEPS` | `8` | How many tool rounds one answer may take |
+| `AGENT_LOOP_TIMEOUT_MS` | `120000` | How long one tool loop may run before it stops |
 | `MINDMAPPR_INDEX_DIR` | home `mindmappr-brain/index` | Folder that holds `chunks.json` and `embeddings.json` |
 | `MINDMAPPR_INDEX_TOP_K` | `5` | How many notes to attach (maximum 20) |
 | `LM_STUDIO_API_KEY` | empty | Sent as a bearer token only when set. LM Studio does not require one. |
@@ -92,8 +94,11 @@ The default index folder is `%USERPROFILE%\mindmappr-brain\index` (`mindmappr-br
 - Otherwise notes are ranked by keyword overlap with the question.
 - Matching notes are added as reference material on the chat request. The prompt text is in `docs/prompts/system/local-notes-context.md`.
 - A missing, empty, or unreadable index still sends the question to LM Studio, without notes.
-- If LM Studio is not running or returns an error, the answer uses the existing OpenRouter path (`LLM_API_KEY`, `LLM_MODEL`), including a model chosen in the chat request. Notes stay on the local request. They are not sent to OpenRouter.
-- Agent answers keep the agent's token budget (up to 16384). Plain chat uses 4096.
+- If LM Studio is not running or returns an error before a tool succeeds, the answer uses the existing OpenRouter path (`LLM_API_KEY`, `LLM_MODEL`), including a model chosen in the chat request. Notes stay on the local request. They are not sent to OpenRouter.
+- Local and OpenRouter answers can call tools and use the results on the next step. Set `LM_STUDIO_MODEL` when you want a specific local model, including a large one. Leave it unset and MindMappr asks LM Studio which models are loaded (`/api/v0/models`) and will not start a model that is only on disk. A loaded qwen is preferred. A 20B or 27B model is not chosen on its own.
+- Before a local request is sent, notes are folded into one opening system message and the turns alternate user then assistant. Gemma, which cannot take tool roles, sees tool calls as plain text. If LM Studio rejects the template, that text form is tried once.
+- The local prompt is kept under about three quarters of the loaded context (`loaded_context_length`, or 8192 when LM Studio does not say). Oldest chat turns, notes, and long tool results are shortened first. If LM Studio still says the request exceeds the context, it is shortened again and tried once.
+- Agent answers keep the agent's token budget (up to 16384) on that request. Plain chat uses 4096. The prompt itself is still trimmed to the loaded context.
 - `chunks.json` and `embeddings.json` are read again when their size or timestamps change. A repeat question stats the files and reuses the loaded index.
 
 ```bash
